@@ -1,0 +1,1432 @@
+TreePoint { x: 0.0, y: 75.0 } to TreePoint { x: 90.0, y: 15.0 } lengths [10, 30] shares [[], []] blockages [Rect { min: Point { x: Dbu(50), y: Dbu(0) }, max: Point { x: Dbu(70), y: Dbu(20) } }]
+  b__f_clk at (90 15)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 70.0, y: 60.0 } to TreePoint { x: 0.0, y: 75.0 } lengths [10, 25] shares [[0.5, 0.5], []] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(30) }, max: Point { x: Dbu(40), y: Dbu(50) } }]
+  b_0_clk at (65 60)
+  b_1_clk at (60 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 40.0 } to TreePoint { x: 65.0, y: 5.0 } lengths [15, 30, 10] shares [[0.5], [0.5], [1.0, 0.5]] blockages [Rect { min: Point { x: Dbu(0), y: Dbu(30) }, max: Point { x: Dbu(20), y: Dbu(50) } }]
+  b_0_clk at (92 40)
+  b_1_clk at (70 40)
+  b_2_clk at (65 20)
+  b_3_clk at (65 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 55.0, y: 30.0 } to TreePoint { x: 0.0, y: 5.0 } lengths [5, 15] shares [[1.0, 0.25], [1.0]] blockages []
+  b_0_clk at (50 30)
+  b_1_clk at (48 30)
+  b_2_clk at (35 30)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 5.0, y: 85.0 } to TreePoint { x: 0.0, y: 100.0 } lengths [20] shares [[]] blockages [Rect { min: Point { x: Dbu(50), y: Dbu(20) }, max: Point { x: Dbu(70), y: Dbu(40) } }]
+  b__f_clk at (0 100)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 65.0, y: 65.0 } to TreePoint { x: 60.0, y: 60.0 } lengths [25, 10, 5] shares [[0.5], [0.25], [0.25, 0.25]] blockages []
+  b_0_clk at (60 57)
+  b_1_clk at (60 42)
+  b_2_clk at (60 33)
+  b_3_clk at (60 32)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 95.0, y: 90.0 } to TreePoint { x: 25.0, y: 100.0 } lengths [30] shares [[]] blockages []
+  b__f_clk at (25 100)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 35.0, y: 100.0 } to TreePoint { x: 30.0, y: 60.0 } lengths [10, 10, 5, 30] shares [[], [], [1.0, 0.25], [0.5]] blockages []
+  b_0_clk at (30 80)
+  b_1_clk at (30 78)
+  b_2_clk at (30 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 25.0, y: 0.0 } to TreePoint { x: 10.0, y: 80.0 } lengths [5, 15] shares [[], [0.5]] blockages []
+  b_0_clk at (12 0)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 35.0, y: 10.0 } to TreePoint { x: 85.0, y: 10.0 } lengths [30, 15, 15] shares [[1.0, 0.5], [1.0], [1.0]] blockages []
+  b_0_clk at (65 10)
+  b_1_clk at (80 10)
+  b_2_clk at (80 10)
+  b_3_clk at (85 0)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 55.0, y: 80.0 } to TreePoint { x: 65.0, y: 55.0 } lengths [30, 20, 15, 25] shares [[], [0.25], [], []] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(10) }, max: Point { x: Dbu(90), y: Dbu(30) } }]
+  b_0_clk at (65 55)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 95.0, y: 65.0 } to TreePoint { x: 85.0, y: 80.0 } lengths [10] shares [[0.25]] blockages []
+  b_0_clk at (92 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 35.0, y: 60.0 } to TreePoint { x: 45.0, y: 30.0 } lengths [15, 30] shares [[1.0], []] blockages []
+  b_0_clk at (45 55)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 45.0, y: 60.0 } to TreePoint { x: 15.0, y: 100.0 } lengths [30, 5, 5] shares [[], [1.0], [1.0, 1.0]] blockages []
+  b_0_clk at (15 65)
+  b_1_clk at (15 70)
+  b_2_clk at (15 75)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 55.0, y: 50.0 } to TreePoint { x: 95.0, y: 100.0 } lengths [30, 10, 15] shares [[0.5], [0.5], [1.0, 0.25]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(40) }, max: Point { x: Dbu(40), y: Dbu(60) } }]
+  b_0_clk at (70 50)
+  b_1_clk at (90 50)
+  b_2_clk at (95 65)
+  b_3_clk at (95 68)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 15.0, y: 25.0 } to TreePoint { x: 35.0, y: 90.0 } lengths [20, 10, 30] shares [[0.25], [], []] blockages []
+  b_0_clk at (20 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 0.0, y: 75.0 } to TreePoint { x: 80.0, y: 65.0 } lengths [10, 30, 20, 25] shares [[], [1.0, 1.0], [1.0], []] blockages []
+  b_0_clk at (40 75)
+  b_1_clk at (70 75)
+  b_2_clk at (60 75)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 50.0, y: 60.0 } to TreePoint { x: 90.0, y: 60.0 } lengths [20, 20] shares [[0.5], [0.25]] blockages []
+  b_0_clk at (60 60)
+  b_1_clk at (75 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 0.0, y: 85.0 } to TreePoint { x: 50.0, y: 30.0 } lengths [20, 30, 20] shares [[0.25], [1.0, 0.25], [1.0]] blockages []
+  b_0_clk at (5 85)
+  b_1_clk at (50 85)
+  b_2_clk at (50 77)
+  b_3_clk at (50 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 55.0, y: 70.0 } to TreePoint { x: 95.0, y: 45.0 } lengths [5, 10] shares [[1.0, 0.5], [0.5, 0.5]] blockages []
+  b_0_clk at (60 70)
+  b_1_clk at (62 70)
+  b_2_clk at (65 70)
+  b_3_clk at (70 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 95.0, y: 20.0 } to TreePoint { x: 20.0, y: 25.0 } lengths [15] shares [[1.0, 0.5]] blockages []
+  b_0_clk at (80 20)
+  b_1_clk at (72 20)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 30.0 } to TreePoint { x: 5.0, y: 60.0 } lengths [25] shares [[]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(50) }, max: Point { x: Dbu(40), y: Dbu(70) } }]
+  b__f_clk at (5 60)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 80.0, y: 70.0 } to TreePoint { x: 20.0, y: 85.0 } lengths [15, 15, 20] shares [[0.25, 1.0], [0.25, 0.5], [0.25, 1.0]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(20) }, max: Point { x: Dbu(90), y: Dbu(40) } }]
+  b_0_clk at (76 70)
+  b_1_clk at (61 70)
+  b_2_clk at (61 70)
+  b_3_clk at (53 70)
+  b_4_clk at (45 70)
+  b_5_clk at (25 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 10.0, y: 85.0 } to TreePoint { x: 60.0, y: 60.0 } lengths [30, 30, 20, 10] shares [[1.0, 0.25], [1.0, 1.0], [0.5], []] blockages []
+  b_0_clk at (40 85)
+  b_1_clk at (47 85)
+  b_2_clk at (60 75)
+  b_3_clk at (60 45)
+  b_4_clk at (60 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 75.0, y: 5.0 } to TreePoint { x: 30.0, y: 75.0 } lengths [15, 30] shares [[], [0.25, 0.25]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(60) }, max: Point { x: Dbu(60), y: Dbu(80) } }]
+  b_0_clk at (52 5)
+  b_1_clk at (45 5)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 85.0, y: 30.0 } to TreePoint { x: 85.0, y: 65.0 } lengths [15, 30, 30] shares [[], [0.25, 1.0], [0.25, 1.0]] blockages []
+  b_0_clk at (85 52)
+  b_1_clk at (85 82)
+  b_2_clk at (85 82)
+  b_3_clk at (85 112)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 0.0, y: 75.0 } to TreePoint { x: 70.0, y: 35.0 } lengths [30, 15, 20, 5] shares [[0.5, 1.0], [], [1.0], []] blockages []
+  b_0_clk at (15 75)
+  b_1_clk at (45 75)
+  b_2_clk at (65 75)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 30.0, y: 35.0 } to TreePoint { x: 60.0, y: 45.0 } lengths [5, 10] shares [[0.25], []] blockages []
+  b_0_clk at (31 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 0.0, y: 60.0 } to TreePoint { x: 15.0, y: 20.0 } lengths [15] shares [[]] blockages []
+  b__f_clk at (15 20)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 100.0, y: 90.0 } to TreePoint { x: 60.0, y: 45.0 } lengths [5, 10, 5] shares [[], [1.0], [0.25, 0.25]] blockages []
+  b_0_clk at (85 90)
+  b_1_clk at (83 90)
+  b_2_clk at (82 90)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 20.0, y: 20.0 } to TreePoint { x: 15.0, y: 30.0 } lengths [10, 20, 10] shares [[0.5, 1.0], [0.25, 0.25], []] blockages []
+  b_0_clk at (15 20)
+  b_1_clk at (15 30)
+  b_2_clk at (15 30)
+  b_3_clk at (15 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 100.0, y: 95.0 } to TreePoint { x: 70.0, y: 100.0 } lengths [25, 20, 20] shares [[1.0, 0.25], [0.5, 0.5], [0.5]] blockages []
+  b_0_clk at (75 95)
+  b_1_clk at (70 96)
+  b_2_clk at (70 100)
+  b_3_clk at (70 110)
+  b_4_clk at (70 120)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 20.0, y: 75.0 } to TreePoint { x: 10.0, y: 20.0 } lengths [20, 5, 20] shares [[0.5, 0.25], [], [0.25]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(40) }, max: Point { x: Dbu(90), y: Dbu(60) } }]
+  b_0_clk at (10 75)
+  b_1_clk at (10 70)
+  b_2_clk at (10 55)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 55.0, y: 80.0 } to TreePoint { x: 10.0, y: 70.0 } lengths [25, 10, 20] shares [[], [], [0.25, 0.5]] blockages []
+  b_0_clk at (15 80)
+  b_1_clk at (10 75)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 60.0, y: 30.0 } to TreePoint { x: 45.0, y: 70.0 } lengths [10, 10, 15, 15] shares [[0.5], [0.25, 1.0], [1.0, 1.0], []] blockages []
+  b_0_clk at (55 30)
+  b_1_clk at (47 30)
+  b_2_clk at (45 37)
+  b_3_clk at (45 50)
+  b_4_clk at (45 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 50.0, y: 85.0 } to TreePoint { x: 15.0, y: 10.0 } lengths [25, 30, 5, 15] shares [[0.5], [1.0, 1.0], [], [0.25, 1.0]] blockages []
+  b_0_clk at (37 85)
+  b_1_clk at (15 65)
+  b_2_clk at (15 35)
+  b_3_clk at (15 56)
+  b_4_clk at (15 41)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 40.0, y: 5.0 } to TreePoint { x: 30.0, y: 75.0 } lengths [15, 25, 15] shares [[1.0], [0.25], [1.0]] blockages []
+  b_0_clk at (30 10)
+  b_1_clk at (30 16)
+  b_2_clk at (30 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 50.0, y: 50.0 } to TreePoint { x: 35.0, y: 15.0 } lengths [30, 15, 25, 5] shares [[1.0, 0.25], [0.25], [0.5], [1.0]] blockages []
+  b_0_clk at (35 35)
+  b_1_clk at (35 27)
+  b_2_clk at (35 31)
+  b_3_clk at (35 7)
+  b_4_clk at (35 -10)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 10.0, y: 95.0 } to TreePoint { x: 35.0, y: 100.0 } lengths [25] shares [[0.25, 0.25]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(60) }, max: Point { x: Dbu(40), y: Dbu(80) } }]
+  b_0_clk at (16 95)
+  b_1_clk at (22 95)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 10.0, y: 60.0 } to TreePoint { x: 100.0, y: 35.0 } lengths [20] shares [[1.0, 1.0]] blockages []
+  b_0_clk at (30 60)
+  b_1_clk at (50 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 95.0 } to TreePoint { x: 60.0, y: 85.0 } lengths [30, 30, 25] shares [[0.5, 0.5], [], [0.25, 0.25]] blockages []
+  b_0_clk at (85 95)
+  b_1_clk at (70 95)
+  b_2_clk at (60 68)
+  b_3_clk at (60 62)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 40.0, y: 80.0 } to TreePoint { x: 20.0, y: 20.0 } lengths [30, 30, 20] shares [[1.0], [0.5, 1.0], []] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(70) }, max: Point { x: Dbu(80), y: Dbu(90) } }]
+  b_0_clk at (20 70)
+  b_1_clk at (20 55)
+  b_2_clk at (20 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 45.0, y: 90.0 } to TreePoint { x: 75.0, y: 65.0 } lengths [30] shares [[0.25, 0.5]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(70) }, max: Point { x: Dbu(40), y: Dbu(90) } }]
+  b_0_clk at (52 90)
+  b_1_clk at (67 90)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 60.0, y: 0.0 } to TreePoint { x: 75.0, y: 55.0 } lengths [30, 5, 30] shares [[], [], [0.25, 0.25]] blockages [Rect { min: Point { x: Dbu(30), y: Dbu(30) }, max: Point { x: Dbu(50), y: Dbu(50) } }]
+  b_0_clk at (75 27)
+  b_1_clk at (75 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 40.0, y: 35.0 } to TreePoint { x: 25.0, y: 85.0 } lengths [25, 10] shares [[0.25], [1.0, 0.25]] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(40) }, max: Point { x: Dbu(80), y: Dbu(60) } }]
+  b_0_clk at (33 35)
+  b_1_clk at (25 55)
+  b_2_clk at (25 57)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 85.0, y: 30.0 } to TreePoint { x: 75.0, y: 5.0 } lengths [15, 5] shares [[1.0], [0.25]] blockages []
+  b_0_clk at (75 25)
+  b_1_clk at (75 23)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 10.0, y: 5.0 } to TreePoint { x: 100.0, y: 80.0 } lengths [25, 30] shares [[0.5], [0.25, 1.0]] blockages []
+  b_0_clk at (22 5)
+  b_1_clk at (42 5)
+  b_2_clk at (72 5)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 30.0, y: 35.0 } to TreePoint { x: 5.0, y: 5.0 } lengths [20, 30] shares [[], [0.25, 0.25]] blockages []
+  b_0_clk at (5 32)
+  b_1_clk at (5 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 5.0, y: 70.0 } to TreePoint { x: 45.0, y: 70.0 } lengths [5, 10, 25] shares [[0.5], [], []] blockages []
+  b_0_clk at (7 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 65.0, y: 75.0 } to TreePoint { x: 30.0, y: 50.0 } lengths [25, 5, 25, 5] shares [[], [0.25], [], [0.25, 0.5]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(30) }, max: Point { x: Dbu(60), y: Dbu(50) } }]
+  b_0_clk at (38 75)
+  b_1_clk at (30 53)
+  b_2_clk at (30 51)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 20.0, y: 65.0 } to TreePoint { x: 45.0, y: 100.0 } lengths [15, 30] shares [[], [1.0, 0.25]] blockages []
+  b_0_clk at (45 85)
+  b_1_clk at (45 92)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 70.0, y: 70.0 } to TreePoint { x: 35.0, y: 45.0 } lengths [25, 15, 5] shares [[0.5], [0.25, 0.5], []] blockages []
+  b_0_clk at (57 70)
+  b_1_clk at (41 70)
+  b_2_clk at (35 68)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 25.0, y: 30.0 } to TreePoint { x: 60.0, y: 100.0 } lengths [20, 15, 10] shares [[0.25, 0.25], [0.5], [0.25, 0.25]] blockages []
+  b_0_clk at (30 30)
+  b_1_clk at (35 30)
+  b_2_clk at (52 30)
+  b_3_clk at (60 32)
+  b_4_clk at (60 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 75.0, y: 80.0 } to TreePoint { x: 40.0, y: 50.0 } lengths [10] shares [[1.0, 0.5]] blockages []
+  b_0_clk at (65 80)
+  b_1_clk at (60 80)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 70.0, y: 25.0 } to TreePoint { x: 15.0, y: 30.0 } lengths [30, 15, 15, 25] shares [[0.25], [1.0], [], []] blockages []
+  b_0_clk at (62 25)
+  b_1_clk at (25 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 90.0, y: 60.0 } to TreePoint { x: 10.0, y: 100.0 } lengths [20, 5] shares [[0.5, 1.0], []] blockages []
+  b_0_clk at (80 60)
+  b_1_clk at (60 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 40.0, y: 45.0 } to TreePoint { x: 25.0, y: 20.0 } lengths [10, 15] shares [[], []] blockages []
+  b__f_clk at (25 20)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 75.0 } to TreePoint { x: 20.0, y: 75.0 } lengths [20, 30, 5] shares [[1.0], [0.5], [0.25, 0.25]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(10) }, max: Point { x: Dbu(60), y: Dbu(30) } }]
+  b_0_clk at (20 65)
+  b_1_clk at (20 50)
+  b_2_clk at (20 33)
+  b_3_clk at (20 32)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 5.0, y: 15.0 } to TreePoint { x: 75.0, y: 70.0 } lengths [15, 10, 10] shares [[1.0], [0.25, 1.0], []] blockages [Rect { min: Point { x: Dbu(30), y: Dbu(20) }, max: Point { x: Dbu(50), y: Dbu(40) } }]
+  b_0_clk at (20 15)
+  b_1_clk at (22 15)
+  b_2_clk at (32 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 85.0, y: 25.0 } to TreePoint { x: 65.0, y: 0.0 } lengths [10, 25] shares [[1.0, 1.0], [1.0, 0.25]] blockages []
+  b_0_clk at (75 25)
+  b_1_clk at (65 25)
+  b_2_clk at (65 10)
+  b_3_clk at (65 3)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 15.0, y: 0.0 } to TreePoint { x: 5.0, y: 30.0 } lengths [10, 30] shares [[1.0, 0.25], []] blockages []
+  b_0_clk at (5 0)
+  b_1_clk at (5 2)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 60.0, y: 35.0 } to TreePoint { x: 30.0, y: 65.0 } lengths [30, 30, 25, 30] shares [[0.25, 0.5], [], [1.0, 1.0], [0.25, 0.25]] blockages []
+  b_0_clk at (52 35)
+  b_1_clk at (37 35)
+  b_2_clk at (30 90)
+  b_3_clk at (30 115)
+  b_4_clk at (30 97)
+  b_5_clk at (30 105)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 80.0, y: 0.0 } to TreePoint { x: 85.0, y: 5.0 } lengths [25] shares [[0.25]] blockages []
+  b_0_clk at (85 1)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 30.0, y: 35.0 } to TreePoint { x: 65.0, y: 40.0 } lengths [30, 15, 15] shares [[0.25], [], []] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(20) }, max: Point { x: Dbu(30), y: Dbu(40) } }]
+  b_0_clk at (37 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 90.0, y: 95.0 } to TreePoint { x: 55.0, y: 45.0 } lengths [20] shares [[1.0, 1.0]] blockages []
+  b_0_clk at (70 95)
+  b_1_clk at (55 90)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 25.0, y: 70.0 } to TreePoint { x: 60.0, y: 15.0 } lengths [20, 25, 15, 25] shares [[], [], [1.0, 0.25], []] blockages []
+  b_0_clk at (60 45)
+  b_1_clk at (60 41)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 65.0, y: 55.0 } to TreePoint { x: 70.0, y: 80.0 } lengths [5] shares [[]] blockages []
+  b__f_clk at (70 80)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 50.0 } to TreePoint { x: 95.0, y: 90.0 } lengths [5] shares [[0.5, 0.5]] blockages []
+  b_0_clk at (12 50)
+  b_1_clk at (15 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 25.0, y: 15.0 } to TreePoint { x: 95.0, y: 40.0 } lengths [30, 30] shares [[0.5, 0.25], [0.5, 0.25]] blockages []
+  b_0_clk at (40 15)
+  b_1_clk at (47 15)
+  b_2_clk at (70 15)
+  b_3_clk at (77 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 60.0, y: 45.0 } to TreePoint { x: 45.0, y: 45.0 } lengths [20] shares [[]] blockages []
+  b__f_clk at (45 45)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 35.0, y: 15.0 } to TreePoint { x: 40.0, y: 50.0 } lengths [15, 15] shares [[], [1.0, 0.5]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(0) }, max: Point { x: Dbu(60), y: Dbu(20) } }]
+  b_0_clk at (40 40)
+  b_1_clk at (40 47)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 15.0, y: 55.0 } to TreePoint { x: 60.0, y: 75.0 } lengths [25, 10, 30, 30] shares [[0.25, 0.5], [0.5, 0.25], [0.5], [1.0]] blockages []
+  b_0_clk at (21 55)
+  b_1_clk at (33 55)
+  b_2_clk at (45 55)
+  b_3_clk at (47 55)
+  b_4_clk at (60 60)
+  b_5_clk at (60 105)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 0.0, y: 100.0 } to TreePoint { x: 95.0, y: 5.0 } lengths [5, 25] shares [[1.0], [1.0]] blockages []
+  b_0_clk at (5 100)
+  b_1_clk at (30 100)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 50.0, y: 10.0 } to TreePoint { x: 55.0, y: 25.0 } lengths [20, 30, 5] shares [[0.5], [1.0, 0.25], [0.5, 1.0]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(0) }, max: Point { x: Dbu(40), y: Dbu(20) } }]
+  b_0_clk at (55 15)
+  b_1_clk at (55 55)
+  b_2_clk at (55 62)
+  b_3_clk at (55 57)
+  b_4_clk at (55 62)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 100.0, y: 100.0 } to TreePoint { x: 30.0, y: 85.0 } lengths [30, 15] shares [[], []] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(20) }, max: Point { x: Dbu(80), y: Dbu(40) } }]
+  b__f_clk at (30 85)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 70.0, y: 40.0 } to TreePoint { x: 5.0, y: 75.0 } lengths [15, 30] shares [[], [0.25]] blockages []
+  b_0_clk at (47 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 50.0, y: 35.0 } to TreePoint { x: 95.0, y: 15.0 } lengths [20] shares [[0.5, 0.25]] blockages []
+  b_0_clk at (60 35)
+  b_1_clk at (65 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 65.0, y: 45.0 } to TreePoint { x: 35.0, y: 100.0 } lengths [10, 5, 5] shares [[], [0.25], [0.5, 0.5]] blockages []
+  b_0_clk at (53 45)
+  b_1_clk at (47 45)
+  b_2_clk at (45 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 35.0, y: 100.0 } to TreePoint { x: 85.0, y: 60.0 } lengths [30, 15] shares [[1.0], [1.0, 0.5]] blockages []
+  b_0_clk at (65 100)
+  b_1_clk at (80 100)
+  b_2_clk at (85 97)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 15.0, y: 65.0 } to TreePoint { x: 80.0, y: 85.0 } lengths [30] shares [[0.25]] blockages []
+  b_0_clk at (22 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 45.0, y: 90.0 } to TreePoint { x: 30.0, y: 25.0 } lengths [25, 10, 25, 20] shares [[0.5, 0.25], [], [0.25], [1.0, 0.25]] blockages []
+  b_0_clk at (32 90)
+  b_1_clk at (30 86)
+  b_2_clk at (30 63)
+  b_3_clk at (30 25)
+  b_4_clk at (30 20)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 85.0, y: 5.0 } to TreePoint { x: 25.0, y: 45.0 } lengths [5, 5, 15] shares [[0.5, 1.0], [1.0, 0.25], []] blockages []
+  b_0_clk at (82 5)
+  b_1_clk at (77 5)
+  b_2_clk at (75 5)
+  b_3_clk at (73 5)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 90.0, y: 45.0 } to TreePoint { x: 20.0, y: 35.0 } lengths [15] shares [[0.5]] blockages []
+  b_0_clk at (82 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 50.0 } to TreePoint { x: 20.0, y: 65.0 } lengths [25, 10, 5] shares [[1.0, 0.25], [0.25, 0.5], [1.0, 0.5]] blockages [Rect { min: Point { x: Dbu(30), y: Dbu(30) }, max: Point { x: Dbu(50), y: Dbu(50) } }]
+  b_0_clk at (20 65)
+  b_1_clk at (20 71)
+  b_2_clk at (20 67)
+  b_3_clk at (20 72)
+  b_4_clk at (20 80)
+  b_5_clk at (20 82)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 70.0, y: 80.0 } to TreePoint { x: 80.0, y: 35.0 } lengths [25, 25] shares [[], []] blockages []
+  b__f_clk at (80 35)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 90.0, y: 100.0 } to TreePoint { x: 80.0, y: 65.0 } lengths [25] shares [[]] blockages []
+  b__f_clk at (80 65)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 45.0, y: 100.0 } to TreePoint { x: 85.0, y: 95.0 } lengths [5, 5, 20] shares [[0.5, 0.5], [], [1.0]] blockages []
+  b_0_clk at (47 100)
+  b_1_clk at (50 100)
+  b_2_clk at (75 100)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 100.0, y: 50.0 } to TreePoint { x: 20.0, y: 60.0 } lengths [5, 30] shares [[1.0], [0.25, 0.25]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(60) }, max: Point { x: Dbu(60), y: Dbu(80) } }]
+  b_0_clk at (95 50)
+  b_1_clk at (87 50)
+  b_2_clk at (80 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 30.0, y: 60.0 } to TreePoint { x: 30.0, y: 45.0 } lengths [15, 10] shares [[], []] blockages []
+  b__f_clk at (30 45)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 100.0, y: 45.0 } to TreePoint { x: 50.0, y: 95.0 } lengths [25] shares [[0.5, 0.25]] blockages []
+  b_0_clk at (87 45)
+  b_1_clk at (81 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 55.0, y: 0.0 } to TreePoint { x: 55.0, y: 20.0 } lengths [25, 25, 30] shares [[], [], [0.25, 1.0]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(60) }, max: Point { x: Dbu(40), y: Dbu(80) } }]
+  b_0_clk at (55 57)
+  b_1_clk at (55 87)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 10.0, y: 15.0 } to TreePoint { x: 80.0, y: 15.0 } lengths [30, 10, 5] shares [[], [0.25, 1.0], []] blockages []
+  b_0_clk at (42 15)
+  b_1_clk at (52 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 15.0 } to TreePoint { x: 75.0, y: 95.0 } lengths [25, 15, 15] shares [[0.25, 0.5], [1.0, 1.0], [1.0]] blockages []
+  b_0_clk at (93 15)
+  b_1_clk at (81 15)
+  b_2_clk at (75 30)
+  b_3_clk at (75 45)
+  b_4_clk at (75 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 20.0, y: 40.0 } to TreePoint { x: 15.0, y: 10.0 } lengths [10] shares [[]] blockages []
+  b__f_clk at (15 10)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 40.0, y: 10.0 } to TreePoint { x: 20.0, y: 35.0 } lengths [5] shares [[0.5]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(20) }, max: Point { x: Dbu(90), y: Dbu(40) } }]
+  b_0_clk at (37 10)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 55.0, y: 90.0 } to TreePoint { x: 40.0, y: 20.0 } lengths [15, 30, 10] shares [[], [0.5, 1.0], []] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(20) }, max: Point { x: Dbu(30), y: Dbu(40) } }]
+  b_0_clk at (40 75)
+  b_1_clk at (40 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 30.0, y: 70.0 } to TreePoint { x: 45.0, y: 75.0 } lengths [25, 5, 25, 30] shares [[1.0, 0.25], [], [0.5], []] blockages []
+  b_0_clk at (45 80)
+  b_1_clk at (45 86)
+  b_2_clk at (45 97)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 45.0, y: 100.0 } to TreePoint { x: 20.0, y: 10.0 } lengths [30] shares [[]] blockages []
+  b__f_clk at (20 10)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 0.0, y: 45.0 } to TreePoint { x: 100.0, y: 70.0 } lengths [20] shares [[0.25, 0.5]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(30) }, max: Point { x: Dbu(90), y: Dbu(50) } }]
+  b_0_clk at (5 45)
+  b_1_clk at (15 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 95.0, y: 95.0 } to TreePoint { x: 30.0, y: 95.0 } lengths [30, 30] shares [[], []] blockages []
+  b__f_clk at (30 95)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 20.0, y: 75.0 } to TreePoint { x: 45.0, y: 35.0 } lengths [15, 10, 5] shares [[0.5, 0.5], [1.0, 0.5], [1.0]] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(70) }, max: Point { x: Dbu(30), y: Dbu(90) } }]
+  b_0_clk at (30 75)
+  b_1_clk at (32 75)
+  b_2_clk at (42 75)
+  b_3_clk at (45 72)
+  b_4_clk at (45 72)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 30.0, y: 45.0 } to TreePoint { x: 35.0, y: 45.0 } lengths [5, 30, 30] shares [[1.0], [0.25], []] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(30) }, max: Point { x: Dbu(30), y: Dbu(50) } }]
+  b_0_clk at (35 45)
+  b_1_clk at (35 37)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 35.0, y: 70.0 } to TreePoint { x: 50.0, y: 95.0 } lengths [30] shares [[]] blockages []
+  b__f_clk at (50 95)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 100.0, y: 60.0 } to TreePoint { x: 95.0, y: 65.0 } lengths [5, 30] shares [[0.25, 0.5], []] blockages []
+  b_0_clk at (98 60)
+  b_1_clk at (96 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 40.0 } to TreePoint { x: 30.0, y: 5.0 } lengths [20, 30] shares [[], [0.25]] blockages []
+  b_0_clk at (72 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 15.0, y: 90.0 } to TreePoint { x: 25.0, y: 20.0 } lengths [20] shares [[]] blockages []
+  b__f_clk at (25 20)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 5.0, y: 85.0 } to TreePoint { x: 70.0, y: 80.0 } lengths [15, 5, 25, 15] shares [[0.25, 1.0], [0.5, 0.25], [0.5, 0.25], [1.0, 0.5]] blockages [Rect { min: Point { x: Dbu(0), y: Dbu(70) }, max: Point { x: Dbu(20), y: Dbu(90) } }]
+  b_0_clk at (8 90)
+  b_1_clk at (20 85)
+  b_2_clk at (20 86)
+  b_3_clk at (12 90)
+  b_4_clk at (21 85)
+  b_5_clk at (27 85)
+  b_6_clk at (49 85)
+  b_7_clk at (56 85)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5), Buffer(6)]
+  n_6_clk: [Buffer(6), Buffer(7)]
+  n_7_clk: [Buffer(7)]
+TreePoint { x: 95.0, y: 15.0 } to TreePoint { x: 85.0, y: 70.0 } lengths [20] shares [[0.5]] blockages []
+  b_0_clk at (85 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 15.0, y: 20.0 } to TreePoint { x: 95.0, y: 30.0 } lengths [5, 5, 5, 25] shares [[1.0], [], [], []] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(30) }, max: Point { x: Dbu(60), y: Dbu(50) } }]
+  b_0_clk at (20 20)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 65.0, y: 90.0 } to TreePoint { x: 90.0, y: 10.0 } lengths [30, 10] shares [[0.25, 0.25], []] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(30) }, max: Point { x: Dbu(90), y: Dbu(50) } }]
+  b_0_clk at (72 90)
+  b_1_clk at (80 90)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 50.0, y: 100.0 } to TreePoint { x: 25.0, y: 70.0 } lengths [25, 25, 15, 25] shares [[], [0.5], [0.25, 1.0], [1.0]] blockages []
+  b_0_clk at (25 87)
+  b_1_clk at (25 71)
+  b_2_clk at (25 56)
+  b_3_clk at (25 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 85.0, y: 90.0 } to TreePoint { x: 30.0, y: 65.0 } lengths [30, 10, 30] shares [[], [0.25], [0.25, 0.25]] blockages []
+  b_0_clk at (52 90)
+  b_1_clk at (37 90)
+  b_2_clk at (30 90)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 5.0, y: 40.0 } to TreePoint { x: 90.0, y: 50.0 } lengths [30] shares [[0.25, 1.0]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(0) }, max: Point { x: Dbu(90), y: Dbu(20) } }]
+  b_0_clk at (12 40)
+  b_1_clk at (42 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 45.0, y: 40.0 } to TreePoint { x: 45.0, y: 15.0 } lengths [30, 20] shares [[0.5, 1.0], [0.25, 1.0]] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(40) }, max: Point { x: Dbu(30), y: Dbu(60) } }]
+  b_0_clk at (45 25)
+  b_1_clk at (45 -5)
+  b_2_clk at (45 5)
+  b_3_clk at (45 -15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 35.0, y: 45.0 } to TreePoint { x: 30.0, y: 95.0 } lengths [20, 15] shares [[], []] blockages []
+  b__f_clk at (30 95)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 40.0, y: 40.0 } to TreePoint { x: 85.0, y: 55.0 } lengths [25] shares [[]] blockages []
+  b__f_clk at (85 55)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 75.0, y: 40.0 } to TreePoint { x: 30.0, y: 95.0 } lengths [15, 20] shares [[1.0, 0.25], [0.25, 0.5]] blockages []
+  b_0_clk at (60 40)
+  b_1_clk at (56 40)
+  b_2_clk at (55 40)
+  b_3_clk at (45 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 65.0, y: 60.0 } to TreePoint { x: 55.0, y: 65.0 } lengths [5, 20, 25, 25] shares [[1.0, 1.0], [0.5, 1.0], [], [1.0, 0.5]] blockages []
+  b_0_clk at (60 60)
+  b_1_clk at (55 60)
+  b_2_clk at (55 65)
+  b_3_clk at (55 85)
+  b_4_clk at (55 125)
+  b_5_clk at (55 137)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 30.0, y: 65.0 } to TreePoint { x: 5.0, y: 55.0 } lengths [15] shares [[]] blockages []
+  b__f_clk at (5 55)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 45.0, y: 95.0 } to TreePoint { x: 15.0, y: 95.0 } lengths [5] shares [[1.0]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(60) }, max: Point { x: Dbu(60), y: Dbu(80) } }]
+  b_0_clk at (40 95)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 15.0 } to TreePoint { x: 50.0, y: 50.0 } lengths [10, 20] shares [[0.25, 0.5], [0.25]] blockages []
+  b_0_clk at (12 15)
+  b_1_clk at (17 15)
+  b_2_clk at (25 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 10.0, y: 65.0 } to TreePoint { x: 45.0, y: 90.0 } lengths [20] shares [[0.5]] blockages []
+  b_0_clk at (20 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 35.0, y: 80.0 } to TreePoint { x: 50.0, y: 40.0 } lengths [30, 30] shares [[0.25], [0.25]] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(60) }, max: Point { x: Dbu(30), y: Dbu(80) } }]
+  b_0_clk at (42 80)
+  b_1_clk at (50 57)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 50.0, y: 35.0 } to TreePoint { x: 10.0, y: 10.0 } lengths [30, 25, 20] shares [[0.5], [0.5, 0.25], [1.0, 0.25]] blockages []
+  b_0_clk at (35 35)
+  b_1_clk at (10 32)
+  b_2_clk at (10 26)
+  b_3_clk at (10 0)
+  b_4_clk at (10 -5)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 50.0, y: 25.0 } to TreePoint { x: 60.0, y: 75.0 } lengths [5, 10, 25, 30] shares [[1.0], [0.25], [], []] blockages []
+  b_0_clk at (55 25)
+  b_1_clk at (57 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 5.0, y: 40.0 } to TreePoint { x: 85.0, y: 0.0 } lengths [10, 25] shares [[], []] blockages [Rect { min: Point { x: Dbu(50), y: Dbu(50) }, max: Point { x: Dbu(70), y: Dbu(70) } }]
+  b__f_clk at (85 0)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 0.0, y: 100.0 } to TreePoint { x: 5.0, y: 40.0 } lengths [30, 30, 5] shares [[0.5, 0.25], [0.5], [0.5, 0.25]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(0) }, max: Point { x: Dbu(90), y: Dbu(20) } }]
+  b_0_clk at (5 90)
+  b_1_clk at (5 82)
+  b_2_clk at (5 60)
+  b_3_clk at (5 42)
+  b_4_clk at (5 41)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 20.0, y: 50.0 } to TreePoint { x: 75.0, y: 5.0 } lengths [10, 15] shares [[0.25], [0.25]] blockages []
+  b_0_clk at (22 50)
+  b_1_clk at (33 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 95.0, y: 10.0 } to TreePoint { x: 5.0, y: 80.0 } lengths [25, 10] shares [[1.0], []] blockages []
+  b_0_clk at (70 10)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 45.0, y: 30.0 } to TreePoint { x: 40.0, y: 5.0 } lengths [30, 20] shares [[], [1.0]] blockages [Rect { min: Point { x: Dbu(10), y: Dbu(30) }, max: Point { x: Dbu(30), y: Dbu(50) } }]
+  b_0_clk at (40 -15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 65.0, y: 25.0 } to TreePoint { x: 50.0, y: 50.0 } lengths [10] shares [[1.0, 0.5]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(30) }, max: Point { x: Dbu(40), y: Dbu(50) } }]
+  b_0_clk at (55 25)
+  b_1_clk at (50 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 45.0, y: 5.0 } to TreePoint { x: 90.0, y: 40.0 } lengths [5] shares [[1.0]] blockages []
+  b_0_clk at (50 5)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 95.0, y: 40.0 } to TreePoint { x: 0.0, y: 60.0 } lengths [30] shares [[]] blockages []
+  b__f_clk at (0 60)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 20.0, y: 100.0 } to TreePoint { x: 85.0, y: 40.0 } lengths [25, 20] shares [[0.25], [0.5]] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(0) }, max: Point { x: Dbu(80), y: Dbu(20) } }]
+  b_0_clk at (26 100)
+  b_1_clk at (55 100)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 0.0, y: 20.0 } to TreePoint { x: 15.0, y: 100.0 } lengths [25, 25, 30] shares [[1.0], [], []] blockages []
+  b_0_clk at (15 30)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 55.0, y: 15.0 } to TreePoint { x: 75.0, y: 40.0 } lengths [25, 30] shares [[], [1.0, 0.25]] blockages []
+  b_0_clk at (75 50)
+  b_1_clk at (75 57)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 90.0, y: 65.0 } to TreePoint { x: 5.0, y: 20.0 } lengths [5, 25] shares [[1.0], []] blockages []
+  b_0_clk at (85 65)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 0.0, y: 45.0 } to TreePoint { x: 40.0, y: 60.0 } lengths [15] shares [[0.5]] blockages []
+  b_0_clk at (7 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 100.0, y: 35.0 } to TreePoint { x: 90.0, y: 80.0 } lengths [5, 5, 25, 15] shares [[], [0.5, 0.5], [0.5, 0.5], []] blockages []
+  b_0_clk at (92 35)
+  b_1_clk at (90 35)
+  b_2_clk at (90 47)
+  b_3_clk at (90 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 100.0, y: 65.0 } to TreePoint { x: 95.0, y: 100.0 } lengths [30, 25, 20] shares [[0.25], [0.5], [1.0, 0.25]] blockages []
+  b_0_clk at (95 67)
+  b_1_clk at (95 102)
+  b_2_clk at (95 135)
+  b_3_clk at (95 140)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 90.0, y: 60.0 } to TreePoint { x: 5.0, y: 40.0 } lengths [25] shares [[0.5]] blockages []
+  b_0_clk at (77 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 50.0 } to TreePoint { x: 60.0, y: 95.0 } lengths [5, 5, 25] shares [[], [1.0], [0.25, 1.0]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(0) }, max: Point { x: Dbu(90), y: Dbu(20) } }]
+  b_0_clk at (20 50)
+  b_1_clk at (26 50)
+  b_2_clk at (51 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 10.0, y: 65.0 } to TreePoint { x: 10.0, y: 65.0 } lengths [30, 30, 15, 30] shares [[], [0.5, 0.25], [0.5], [1.0]] blockages []
+  b_0_clk at (10 20)
+  b_1_clk at (10 12)
+  b_2_clk at (10 -2)
+  b_3_clk at (10 -40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 10.0, y: 25.0 } to TreePoint { x: 95.0, y: 90.0 } lengths [5, 5] shares [[0.5], [1.0]] blockages [Rect { min: Point { x: Dbu(30), y: Dbu(10) }, max: Point { x: Dbu(50), y: Dbu(30) } }]
+  b_0_clk at (12 25)
+  b_1_clk at (20 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 35.0, y: 50.0 } to TreePoint { x: 40.0, y: 100.0 } lengths [15, 15] shares [[1.0, 1.0], [0.5, 0.5]] blockages []
+  b_0_clk at (40 60)
+  b_1_clk at (40 75)
+  b_2_clk at (40 67)
+  b_3_clk at (40 75)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 20.0, y: 10.0 } to TreePoint { x: 70.0, y: 100.0 } lengths [10, 30, 20] shares [[0.25], [0.5], [1.0]] blockages []
+  b_0_clk at (22 10)
+  b_1_clk at (45 10)
+  b_2_clk at (70 20)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 0.0, y: 80.0 } to TreePoint { x: 55.0, y: 20.0 } lengths [25, 15, 15] shares [[], [], [0.5]] blockages [Rect { min: Point { x: Dbu(40), y: Dbu(30) }, max: Point { x: Dbu(60), y: Dbu(50) } }]
+  b_0_clk at (47 80)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 50.0, y: 25.0 } to TreePoint { x: 75.0, y: 95.0 } lengths [10, 15, 20, 30] shares [[], [0.25, 1.0], [], [1.0]] blockages [Rect { min: Point { x: Dbu(50), y: Dbu(70) }, max: Point { x: Dbu(70), y: Dbu(90) } }]
+  b_0_clk at (63 25)
+  b_1_clk at (75 28)
+  b_2_clk at (75 75)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 90.0, y: 15.0 } to TreePoint { x: 35.0, y: 10.0 } lengths [10] shares [[0.25, 1.0]] blockages []
+  b_0_clk at (87 15)
+  b_1_clk at (77 15)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 35.0, y: 100.0 } to TreePoint { x: 10.0, y: 25.0 } lengths [5, 15, 20] shares [[1.0], [1.0], []] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(10) }, max: Point { x: Dbu(80), y: Dbu(30) } }]
+  b_0_clk at (30 100)
+  b_1_clk at (15 100)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 0.0, y: 90.0 } to TreePoint { x: 50.0, y: 55.0 } lengths [15, 10, 10] shares [[], [0.25, 1.0], [0.5]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(70) }, max: Point { x: Dbu(40), y: Dbu(90) } }]
+  b_0_clk at (17 90)
+  b_1_clk at (27 90)
+  b_2_clk at (30 90)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 15.0, y: 60.0 } to TreePoint { x: 35.0, y: 70.0 } lengths [20] shares [[0.5]] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(40) }, max: Point { x: Dbu(40), y: Dbu(60) } }]
+  b_0_clk at (25 60)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 5.0, y: 80.0 } to TreePoint { x: 100.0, y: 15.0 } lengths [25] shares [[]] blockages []
+  b__f_clk at (100 15)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 0.0, y: 75.0 } to TreePoint { x: 70.0, y: 45.0 } lengths [30, 5, 10, 30] shares [[], [0.5], [0.5, 0.25], [0.5, 0.5]] blockages []
+  b_0_clk at (32 75)
+  b_1_clk at (40 75)
+  b_2_clk at (42 75)
+  b_3_clk at (60 75)
+  b_4_clk at (70 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 95.0, y: 40.0 } to TreePoint { x: 20.0, y: 65.0 } lengths [5, 5, 30, 5] shares [[0.5, 1.0], [], [0.25, 0.25], [0.5, 1.0]] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(0) }, max: Point { x: Dbu(80), y: Dbu(20) } }]
+  b_0_clk at (92 40)
+  b_1_clk at (87 40)
+  b_2_clk at (77 40)
+  b_3_clk at (70 40)
+  b_4_clk at (52 40)
+  b_5_clk at (47 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 30.0, y: 95.0 } to TreePoint { x: 60.0, y: 60.0 } lengths [15, 5, 30, 15] shares [[1.0, 0.5], [0.5], [1.0], [0.5]] blockages []
+  b_0_clk at (45 95)
+  b_1_clk at (52 95)
+  b_2_clk at (47 95)
+  b_3_clk at (60 75)
+  b_4_clk at (60 67)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 0.0, y: 80.0 } to TreePoint { x: 20.0, y: 85.0 } lengths [20, 5, 30, 25] shares [[1.0, 0.25], [], [], []] blockages []
+  b_0_clk at (20 80)
+  b_1_clk at (20 85)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 15.0, y: 5.0 } to TreePoint { x: 80.0, y: 40.0 } lengths [25] shares [[0.5]] blockages []
+  b_0_clk at (27 5)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 90.0, y: 55.0 } to TreePoint { x: 0.0, y: 60.0 } lengths [10, 30, 25] shares [[0.25], [0.25], [1.0, 0.25]] blockages []
+  b_0_clk at (87 55)
+  b_1_clk at (72 55)
+  b_2_clk at (25 55)
+  b_3_clk at (18 55)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 95.0, y: 100.0 } to TreePoint { x: 50.0, y: 40.0 } lengths [5, 20, 10, 10] shares [[], [0.25], [0.25], [0.5]] blockages []
+  b_0_clk at (85 100)
+  b_1_clk at (67 100)
+  b_2_clk at (55 100)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 30.0, y: 45.0 } to TreePoint { x: 40.0, y: 40.0 } lengths [25, 10, 5, 15] shares [[1.0], [0.25, 0.5], [0.25, 1.0], [0.25, 1.0]] blockages []
+  b_0_clk at (40 30)
+  b_1_clk at (40 27)
+  b_2_clk at (40 22)
+  b_3_clk at (40 18)
+  b_4_clk at (40 13)
+  b_5_clk at (40 11)
+  b_6_clk at (40 -3)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5), Buffer(6)]
+  n_6_clk: [Buffer(6)]
+TreePoint { x: 65.0, y: 95.0 } to TreePoint { x: 45.0, y: 55.0 } lengths [25] shares [[]] blockages []
+  b__f_clk at (45 55)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 100.0, y: 90.0 } to TreePoint { x: 95.0, y: 5.0 } lengths [20, 20] shares [[0.5], [0.25]] blockages []
+  b_0_clk at (95 85)
+  b_1_clk at (95 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 35.0, y: 85.0 } to TreePoint { x: 15.0, y: 45.0 } lengths [30, 10, 10] shares [[], [], []] blockages []
+  b__f_clk at (15 45)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 15.0, y: 35.0 } to TreePoint { x: 40.0, y: 5.0 } lengths [20, 10, 10] shares [[], [1.0, 1.0], [0.25]] blockages []
+  b_0_clk at (40 30)
+  b_1_clk at (40 20)
+  b_2_clk at (40 27)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 20.0, y: 60.0 } to TreePoint { x: 90.0, y: 85.0 } lengths [30, 10, 25, 15] shares [[1.0, 0.25], [0.25, 1.0], [], [1.0]] blockages [Rect { min: Point { x: Dbu(0), y: Dbu(20) }, max: Point { x: Dbu(20), y: Dbu(40) } }]
+  b_0_clk at (50 60)
+  b_1_clk at (57 60)
+  b_2_clk at (52 60)
+  b_3_clk at (62 60)
+  b_4_clk at (90 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 40.0, y: 50.0 } to TreePoint { x: 85.0, y: 25.0 } lengths [25, 25] shares [[1.0], [0.5]] blockages []
+  b_0_clk at (65 50)
+  b_1_clk at (77 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 20.0 } to TreePoint { x: 85.0, y: 60.0 } lengths [25, 25, 15, 10] shares [[1.0, 0.25], [], [], []] blockages []
+  b_0_clk at (85 30)
+  b_1_clk at (85 36)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 55.0, y: 80.0 } to TreePoint { x: 50.0, y: 5.0 } lengths [25, 15, 25] shares [[], [0.25, 0.25], []] blockages []
+  b_0_clk at (50 56)
+  b_1_clk at (50 52)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 85.0, y: 70.0 } to TreePoint { x: 5.0, y: 90.0 } lengths [25] shares [[1.0, 0.5]] blockages []
+  b_0_clk at (60 70)
+  b_1_clk at (47 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 40.0, y: 70.0 } to TreePoint { x: 0.0, y: 30.0 } lengths [15] shares [[1.0, 0.25]] blockages []
+  b_0_clk at (25 70)
+  b_1_clk at (21 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 25.0, y: 50.0 } to TreePoint { x: 65.0, y: 15.0 } lengths [25, 30, 15] shares [[], [], [0.5]] blockages []
+  b_0_clk at (65 27)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 95.0, y: 35.0 } to TreePoint { x: 20.0, y: 60.0 } lengths [10, 5, 5] shares [[0.5, 0.5], [], [1.0]] blockages []
+  b_0_clk at (90 35)
+  b_1_clk at (85 35)
+  b_2_clk at (75 35)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 85.0, y: 60.0 } to TreePoint { x: 100.0, y: 5.0 } lengths [15, 30, 30, 20] shares [[1.0, 1.0], [], [1.0, 1.0], []] blockages []
+  b_0_clk at (100 60)
+  b_1_clk at (100 45)
+  b_2_clk at (100 0)
+  b_3_clk at (100 -30)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 100.0, y: 65.0 } to TreePoint { x: 95.0, y: 85.0 } lengths [5] shares [[]] blockages []
+  b__f_clk at (95 85)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 95.0, y: 40.0 } to TreePoint { x: 75.0, y: 10.0 } lengths [15] shares [[1.0]] blockages []
+  b_0_clk at (80 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 20.0, y: 80.0 } to TreePoint { x: 5.0, y: 10.0 } lengths [10, 15, 20] shares [[], [0.5], [1.0]] blockages []
+  b_0_clk at (5 77)
+  b_1_clk at (5 50)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 25.0, y: 0.0 } to TreePoint { x: 5.0, y: 100.0 } lengths [5] shares [[0.5, 0.25]] blockages [Rect { min: Point { x: Dbu(30), y: Dbu(70) }, max: Point { x: Dbu(50), y: Dbu(90) } }]
+  b_0_clk at (22 0)
+  b_1_clk at (21 0)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 65.0, y: 55.0 } to TreePoint { x: 15.0, y: 90.0 } lengths [20, 25] shares [[], [0.5, 1.0]] blockages []
+  b_0_clk at (32 55)
+  b_1_clk at (15 62)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 75.0, y: 45.0 } to TreePoint { x: 100.0, y: 45.0 } lengths [25] shares [[0.25, 0.5]] blockages []
+  b_0_clk at (81 45)
+  b_1_clk at (93 45)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 35.0, y: 25.0 } to TreePoint { x: 85.0, y: 35.0 } lengths [30, 30, 25] shares [[1.0], [], [0.5, 0.25]] blockages [Rect { min: Point { x: Dbu(60), y: Dbu(20) }, max: Point { x: Dbu(80), y: Dbu(40) } }]
+  b_0_clk at (65 19)
+  b_1_clk at (85 41)
+  b_2_clk at (85 47)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 25.0, y: 100.0 } to TreePoint { x: 50.0, y: 65.0 } lengths [30, 10, 5, 10] shares [[1.0], [0.5, 0.5], [0.5], [1.0]] blockages []
+  b_0_clk at (50 95)
+  b_1_clk at (50 90)
+  b_2_clk at (50 85)
+  b_3_clk at (50 82)
+  b_4_clk at (50 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 95.0, y: 40.0 } to TreePoint { x: 85.0, y: 25.0 } lengths [10, 30] shares [[1.0, 0.25], [0.25, 1.0]] blockages []
+  b_0_clk at (85 40)
+  b_1_clk at (85 37)
+  b_2_clk at (85 32)
+  b_3_clk at (85 2)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 45.0, y: 30.0 } to TreePoint { x: 50.0, y: 30.0 } lengths [25, 5] shares [[0.25, 0.5], []] blockages []
+  b_0_clk at (50 28)
+  b_1_clk at (50 16)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 0.0, y: 20.0 } to TreePoint { x: 60.0, y: 40.0 } lengths [10, 20, 10, 5] shares [[0.5, 0.5], [], [0.25], []] blockages []
+  b_0_clk at (5 20)
+  b_1_clk at (10 20)
+  b_2_clk at (32 20)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2)]
+TreePoint { x: 25.0, y: 10.0 } to TreePoint { x: 60.0, y: 50.0 } lengths [20] shares [[0.5, 0.25]] blockages []
+  b_0_clk at (35 10)
+  b_1_clk at (40 10)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 45.0, y: 65.0 } to TreePoint { x: 75.0, y: 70.0 } lengths [5] shares [[]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(10) }, max: Point { x: Dbu(90), y: Dbu(30) } }]
+  b__f_clk at (75 70)
+  root_clk: [Buffer(0)]
+  n__leaf_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 95.0 } to TreePoint { x: 0.0, y: 55.0 } lengths [10, 15] shares [[0.25], []] blockages [Rect { min: Point { x: Dbu(20), y: Dbu(50) }, max: Point { x: Dbu(40), y: Dbu(70) } }]
+  b_0_clk at (7 95)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 10.0, y: 40.0 } to TreePoint { x: 75.0, y: 35.0 } lengths [30, 10, 5] shares [[1.0, 0.5], [1.0], [0.25, 0.25]] blockages []
+  b_0_clk at (40 40)
+  b_1_clk at (55 40)
+  b_2_clk at (50 40)
+  b_3_clk at (51 40)
+  b_4_clk at (52 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 65.0, y: 25.0 } to TreePoint { x: 70.0, y: 65.0 } lengths [5] shares [[0.25]] blockages []
+  b_0_clk at (66 25)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 15.0, y: 85.0 } to TreePoint { x: 10.0, y: 25.0 } lengths [20, 10] shares [[0.5], [0.25]] blockages []
+  b_0_clk at (10 80)
+  b_1_clk at (10 67)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 75.0, y: 0.0 } to TreePoint { x: 5.0, y: 40.0 } lengths [10, 15, 15, 15] shares [[0.25, 1.0], [0.25, 0.25], [], [0.25]] blockages [Rect { min: Point { x: Dbu(50), y: Dbu(30) }, max: Point { x: Dbu(70), y: Dbu(50) } }]
+  b_0_clk at (72 0)
+  b_1_clk at (62 0)
+  b_2_clk at (61 0)
+  b_3_clk at (57 0)
+  b_4_clk at (31 0)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4)]
+TreePoint { x: 40.0, y: 0.0 } to TreePoint { x: 5.0, y: 85.0 } lengths [30, 30] shares [[], [1.0, 0.5]] blockages []
+  b_0_clk at (5 25)
+  b_1_clk at (5 40)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 100.0, y: 70.0 } to TreePoint { x: 25.0, y: 90.0 } lengths [15] shares [[0.5, 0.5]] blockages []
+  b_0_clk at (92 70)
+  b_1_clk at (85 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1)]
+TreePoint { x: 0.0, y: 95.0 } to TreePoint { x: 70.0, y: 55.0 } lengths [5] shares [[0.5]] blockages [Rect { min: Point { x: Dbu(70), y: Dbu(70) }, max: Point { x: Dbu(90), y: Dbu(90) } }]
+  b_0_clk at (2 95)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
+TreePoint { x: 50.0, y: 80.0 } to TreePoint { x: 80.0, y: 55.0 } lengths [10, 5, 5, 10] shares [[0.5], [], [0.5], [1.0, 1.0]] blockages []
+  b_0_clk at (55 80)
+  b_1_clk at (67 80)
+  b_2_clk at (80 80)
+  b_3_clk at (80 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 30.0, y: 55.0 } to TreePoint { x: 35.0, y: 60.0 } lengths [15, 20, 10, 5] shares [[1.0], [1.0], [1.0, 0.25], [0.5, 0.25]] blockages [Rect { min: Point { x: Dbu(0), y: Dbu(30) }, max: Point { x: Dbu(20), y: Dbu(50) } }]
+  b_0_clk at (35 65)
+  b_1_clk at (35 85)
+  b_2_clk at (35 95)
+  b_3_clk at (35 97)
+  b_4_clk at (35 97)
+  b_5_clk at (35 98)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 60.0, y: 30.0 } to TreePoint { x: 5.0, y: 55.0 } lengths [20, 30, 5] shares [[1.0, 0.25], [1.0], [0.25]] blockages [Rect { min: Point { x: Dbu(30), y: Dbu(20) }, max: Point { x: Dbu(50), y: Dbu(40) } }]
+  b_0_clk at (50 30)
+  b_1_clk at (50 31)
+  b_2_clk at (26 30)
+  b_3_clk at (24 30)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3)]
+TreePoint { x: 10.0, y: 10.0 } to TreePoint { x: 85.0, y: 25.0 } lengths [5, 25, 20] shares [[1.0, 0.25], [1.0, 0.25], [1.0, 0.25]] blockages []
+  b_0_clk at (15 10)
+  b_1_clk at (16 10)
+  b_2_clk at (40 10)
+  b_3_clk at (46 10)
+  b_4_clk at (60 10)
+  b_5_clk at (65 10)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0), Buffer(1)]
+  n_1_clk: [Buffer(1), Buffer(2)]
+  n_2_clk: [Buffer(2), Buffer(3)]
+  n_3_clk: [Buffer(3), Buffer(4)]
+  n_4_clk: [Buffer(4), Buffer(5)]
+  n_5_clk: [Buffer(5)]
+TreePoint { x: 50.0, y: 70.0 } to TreePoint { x: 90.0, y: 20.0 } lengths [10, 25, 5] shares [[], [1.0], []] blockages []
+  b_0_clk at (85 70)
+  root_clk: [Buffer(0)]
+  n_0_clk: [Buffer(0)]
