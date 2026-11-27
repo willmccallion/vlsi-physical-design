@@ -1201,3 +1201,6 @@ impl NetlistDB {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
