@@ -269,3 +269,44 @@ fn a_thread_count_is_kept() {
         Some(4)
     );
 }
+
+#[test]
+fn unset_placement_keys_take_the_openroad_flow_defaults() {
+    let config = parse("").unwrap();
+    let gp = &config.global_placement;
+
+    assert_eq!(gp.placer_max_iterations, 2000);
+    assert_eq!(gp.seed, 1);
+    let overflows: Vec<f64> = gp.timing_driven_overflows.iter().map(|s| s.get()).collect();
+    assert_eq!(overflows, [0.64, 0.20]);
+    assert!((gp.timing_net_weight_max - 5.0).abs() < 1e-12);
+    assert!((gp.target_congestion - 1.01).abs() < 1e-12);
+    assert_eq!(config.input.output_def, PathBuf::from("output/placed.def"));
+}
+
+#[test]
+fn io_placement_without_layers_places_no_pins() {
+    let config = parse("[io_placement]").unwrap();
+
+    assert_eq!(config.io_placement.layers, None);
+}
+
+fn tiny_library() -> pare_common::db::library::Library {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let units = pare_common::db::parser::def::read_units(&fixtures.join("tiny.def")).unwrap();
+    pare_common::db::parser::lef::parse_files(&[fixtures.join("tiny.lef")], units).unwrap()
+}
+
+#[test]
+fn clock_layers_must_lie_within_the_signal_layers() {
+    let lib = tiny_library();
+    let range = |routing: &str| {
+        parse(&format!("[routing]\n{routing}"))
+            .unwrap()
+            .routing
+            .clock_layer_range(&lib)
+    };
+
+    assert!(range("max_layer = \"M2\"\nclock_max_layer = \"M3\"").is_err());
+    assert!(range("max_layer = \"M3\"\nclock_max_layer = \"M2\"").is_ok());
+}

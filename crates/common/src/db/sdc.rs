@@ -345,3 +345,6 @@ impl Sdc {
             .find(|m| m.side.is_none_or(|s| s == side) && m.paths.matches(from, to, to_clock))
     }
 }
+
+#[cfg(test)]
+mod tests;

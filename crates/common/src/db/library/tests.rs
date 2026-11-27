@@ -64,3 +64,35 @@ fn a_routing_layer_past_what_layer_ids_count_is_refused() {
     assert_eq!(library.routing_layers.len(), 256);
     assert_eq!(library.layer_ref("m256"), None);
 }
+
+fn tiny_library() -> Library {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let units = crate::db::parser::def::read_units(&fixtures.join("tiny.def")).unwrap();
+    crate::db::parser::lef::parse_files(&[fixtures.join("tiny.lef")], units).unwrap()
+}
+
+#[test]
+fn a_quarter_turn_mirrored_needs_every_symmetry() {
+    let with = |x, y, r90| Symmetry { x, y, r90 };
+
+    assert!(with(true, true, true).allows(Orientation::FW));
+    assert!(!with(false, true, true).allows(Orientation::FW));
+    assert!(!with(true, false, true).allows(Orientation::FE));
+    assert!(!with(true, true, false).allows(Orientation::FE));
+}
+
+#[test]
+fn cut_layers_are_found_by_name_and_routing_layers_are_not() {
+    let lib = tiny_library();
+
+    assert_eq!(lib.cut_layer_id("V1"), Some(CutLayerId(0)));
+    assert_eq!(lib.cut_layer_id("M1"), None);
+}
+
+#[test]
+fn the_default_via_of_a_cut_is_on_that_cut() {
+    let lib = tiny_library();
+
+    let via = lib.default_via(CutLayerId(1)).unwrap();
+    assert_eq!(lib.via(via).name, "M2M3");
+}
