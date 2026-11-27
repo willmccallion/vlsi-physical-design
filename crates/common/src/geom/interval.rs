@@ -99,7 +99,7 @@ pub fn intersect_sorted(a: &[Interval], b: &[Interval]) -> Vec<Interval> {
 /// Calls `visit` with the indices of each pair of intervals of `a` and `b`,
 /// sorted lists of disjoint intervals, that a sweep up both brings side by
 /// side, passing whichever of the two ends first.
-fn sweep_pairs(a: &[Interval], b: &[Interval], mut visit: impl FnMut(usize, usize)) {
+pub(crate) fn sweep_pairs(a: &[Interval], b: &[Interval], mut visit: impl FnMut(usize, usize)) {
     let (mut i, mut j) = (0, 0);
     while let (Some(x), Some(y)) = (a.get(i), b.get(j)) {
         visit(i, j);
