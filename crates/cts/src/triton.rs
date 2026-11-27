@@ -176,25 +176,38 @@ pub fn synthesize(db: &mut NetlistDB, input: &CtsInput<'_>) -> Result<ClockTrees
     })
 }
 
-/// The settings the trees are built with: the options, and the fanout
-/// limit and cluster sizes the root and sink buffers' limits allow, as
-/// `TritonCTS::setupCharacterization` derives them.
+/// The settings the trees are built with: the options, the fanout limit
+/// and cluster sizes the root and sink buffers' limits allow, and the wire
+/// length limit.
 fn tree_settings(input: &CtsInput<'_>, buffers: &ClockBuffers) -> Result<Settings, CtsError> {
-    let mut settings = Settings::new(input.options);
     let liberty = input.link.liberty;
     let design_fanout = input.sdc.limits.max_fanout;
-    let sink_fanout = fanout_limit(liberty, buffers.sink, design_fanout);
-    let root_fanout = fanout_limit(liberty, buffers.root, design_fanout);
-    if let Some(root) = root_fanout
-        && MAX_LEAF_SINKS > root
-    {
-        settings.max_fanout = Some(root);
-    }
-    if let Some(sink) = sink_fanout {
+    let fanouts = BufferFanouts {
+        root: fanout_limit(liberty, buffers.root, design_fanout),
+        sink: fanout_limit(liberty, buffers.sink, design_fanout),
+    };
+    let mut settings = fanout_settings(input.options, fanouts)?;
+    settings.max_wire_length = input.max_wire_length;
+    Ok(settings)
+}
+
+/// The most fanout the root and sink buffers may drive; none without a
+/// limit.
+#[derive(Clone, Copy, Debug)]
+struct BufferFanouts {
+    root: Option<u32>,
+    sink: Option<u32>,
+}
+
+/// The settings of `options` with the fanout limit and cluster sizes the
+/// buffers' fanout limits allow, as `TritonCTS::setupCharacterization`
+/// derives them.
+fn fanout_settings(options: CtsOptions, fanouts: BufferFanouts) -> Result<Settings, CtsError> {
+    let mut settings = Settings::new(options);
+    settings.max_fanout = fanouts.root.filter(|&root| root < MAX_LEAF_SINKS);
+    if let Some(sink) = fanouts.sink {
         settings.limit_sink_clustering_sizes(sink);
-        if settings.max_fanout.is_some_and(|max| sink < max) {
-            settings.max_fanout = Some(sink);
-        }
+        settings.max_fanout = settings.max_fanout.map(|max| max.min(sink));
     }
     // NOTE: TritonCTS takes a limit of one and splits the sinks level after
     // level until memory runs out; PARE refuses it.
@@ -203,7 +216,6 @@ fn tree_settings(input: &CtsInput<'_>, buffers: &ClockBuffers) -> Result<Setting
     {
         return Err(CtsError::FanoutLimitTooLow(limit));
     }
-    settings.max_wire_length = input.max_wire_length;
     Ok(settings)
 }
 
