@@ -10,6 +10,7 @@ use super::dbu::{Dbu, DbuArea};
 use super::interval::{Interval, merge_touching};
 use super::point::Point;
 use super::rect::Rect;
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 
@@ -82,14 +83,11 @@ pub struct Edge {
 impl Edge {
     /// The way the edge runs.
     pub fn heading(&self) -> Heading {
-        if self.to.x > self.from.x {
-            Heading::East
-        } else if self.to.x < self.from.x {
-            Heading::West
-        } else if self.to.y > self.from.y {
-            Heading::North
-        } else {
-            Heading::South
+        match (self.to.x.cmp(&self.from.x), self.to.y.cmp(&self.from.y)) {
+            (Ordering::Greater, _) => Heading::East,
+            (Ordering::Less, _) => Heading::West,
+            (Ordering::Equal, Ordering::Greater) => Heading::North,
+            (Ordering::Equal, _) => Heading::South,
         }
     }
 
@@ -107,9 +105,11 @@ impl Region {
 
     /// The union of `rects`.
     pub fn from_rects(rects: impl IntoIterator<Item = Rect<Dbu>>) -> Self {
+        // A rectangle without width would stretch across the slab at its x;
+        // one without height adds only empty spans, which merging drops.
         let mut rects: Vec<Rect<Dbu>> = rects
             .into_iter()
-            .filter(|r| r.width() > Dbu::ZERO && r.height() > Dbu::ZERO)
+            .filter(|r| r.width() > Dbu::ZERO)
             .collect();
         if rects.is_empty() {
             return Self::new();
@@ -283,14 +283,7 @@ impl Region {
             .difference(self)
             .connected(Corners::Join)
             .into_iter()
-            .filter(|space| {
-                space.bounding_box().is_some_and(|b| {
-                    frame.min.x < b.min.x
-                        && frame.min.y < b.min.y
-                        && b.max.x < frame.max.x
-                        && b.max.y < frame.max.y
-                })
-            })
+            .filter(|space| space.bounding_box() != Some(frame))
             .collect()
     }
 
@@ -367,9 +360,7 @@ impl Region {
         xs.dedup();
         let mut k = 0;
         for x in xs {
-            while k < self.slabs.len() && self.slabs[k].x1 < x {
-                k += 1;
-            }
+            k += self.slabs[k..].iter().take_while(|s| s.x1 < x).count();
             let left = self.slabs[k..]
                 .iter()
                 .take(2)
