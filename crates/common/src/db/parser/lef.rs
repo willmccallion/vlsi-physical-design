@@ -1209,3 +1209,6 @@ pub(crate) fn parse_pin_direction(word: &str) -> Option<PinDirection> {
 pub(crate) fn parse_signal_use(word: &str) -> Option<SignalUse> {
     SignalUse::from_keyword(&word.to_ascii_uppercase())
 }
+
+#[cfg(test)]
+mod tests;
