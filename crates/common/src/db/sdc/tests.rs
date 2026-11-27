@@ -123,3 +123,31 @@ fn a_false_path_on_one_side_leaves_the_other_side_checked() {
     assert!(!sdc.is_false_path(from, to, None, MinMax::Min));
     assert!(!sdc.is_false_path(PathEnd::Clock(ClockId(1)), to, None, MinMax::Max));
 }
+
+#[test]
+fn the_last_multicycle_path_matching_both_ends_and_the_side_applies() {
+    let mut sdc = two_clocks();
+    let path = |side, multiplier, paths| MultiCyclePath {
+        side,
+        multiplier,
+        use_end_clock: true,
+        paths,
+    };
+    sdc.multicycle_paths
+        .push(path(None, 2, spec(&[0], &[], &[])));
+    sdc.multicycle_paths
+        .push(path(Some(MinMax::Max), 4, spec(&[0], &[], &[3])));
+    let (clock, port) = (
+        |c| PathEnd::Clock(ClockId(c)),
+        |p| PathEnd::Port(IoPinId::new(p)),
+    );
+    let found = |from, to, side| {
+        sdc.multicycle_path(from, to, None, side)
+            .map(|m| m.multiplier)
+    };
+
+    assert_eq!(found(clock(0), port(3), MinMax::Max), Some(4));
+    assert_eq!(found(clock(0), port(3), MinMax::Min), Some(2));
+    assert_eq!(found(clock(0), port(4), MinMax::Max), Some(2));
+    assert_eq!(found(clock(1), port(3), MinMax::Max), None);
+}
