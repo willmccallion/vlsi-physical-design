@@ -109,33 +109,6 @@ impl Balancer<'_> {
         }
     }
 
-    /// Whether the clock passes through an input, as
-    /// `LatencyBalancer::propagateClock`: through buffers, inverters and
-    /// combinational cells, and through a sequential cell only at a clock
-    /// gate's clock or a latch's data.
-    fn propagates(&self, db: &NetlistDB, pin: PinId) -> bool {
-        let Some((cell, _, _)) = pin_direction(db, pin) else {
-            return false;
-        };
-        let Some((_, lib)) = self.link.cell(db, cell) else {
-            return false;
-        };
-        if lib.is_inverter() || lib.is_buffer() || !lib.is_sequential() {
-            return true;
-        }
-        let Some((_, port)) = self.link.pin_port(db, pin) else {
-            return false;
-        };
-        let p = &lib.ports[port];
-        p.clock_gate == ClockGatePin::Clock
-            || lib.sequentials.iter().any(|s| {
-                s.kind == SequentialKind::Latch
-                    && s.data
-                        .as_ref()
-                        .is_some_and(|d| d.ports().contains(&p.name.as_str()))
-            })
-    }
-
     /// When the clock reaches the registers behind a sink pin: its arrival
     /// at the pin plus the clock tree inside the sink's cell, as
     /// `LatencyBalancer::buildGraph` and `computeSinkArrivalRecur` add them;
@@ -172,7 +145,7 @@ impl Balancer<'_> {
         let Some(out) = first_output(db, cell) else {
             return;
         };
-        if !self.propagates(db, pin) {
+        if !propagates_clock(self.link, db, pin) {
             return;
         }
         let net = db.pins[out].net;
@@ -217,7 +190,7 @@ impl Balancer<'_> {
                     continue;
                 }
                 let sink = is_sink(self.link, db, pin);
-                if !sink && !self.propagates(db, pin) {
+                if !sink && !propagates_clock(self.link, db, pin) {
                     continue;
                 }
                 let id = self.nodes.len();
@@ -397,6 +370,33 @@ impl Balancer<'_> {
         }
         Ok(first_input_pin)
     }
+}
+
+/// Whether the clock passes through an input, as
+/// `LatencyBalancer::propagateClock`: through buffers, inverters and
+/// combinational cells, and through a sequential cell only at a clock
+/// gate's clock or a latch's data.
+fn propagates_clock(link: &Link<'_>, db: &NetlistDB, pin: PinId) -> bool {
+    let Some((cell, _, _)) = pin_direction(db, pin) else {
+        return false;
+    };
+    let Some((_, lib)) = link.cell(db, cell) else {
+        return false;
+    };
+    if lib.is_inverter() || lib.is_buffer() || !lib.is_sequential() {
+        return true;
+    }
+    let Some((_, port)) = link.pin_port(db, pin) else {
+        return false;
+    };
+    let p = &lib.ports[port];
+    p.clock_gate == ClockGatePin::Clock
+        || lib.sequentials.iter().any(|s| {
+            s.kind == SequentialKind::Latch
+                && s.data
+                    .as_ref()
+                    .is_some_and(|d| d.ports().contains(&p.name.as_str()))
+        })
 }
 
 /// The latest rising delay of `buffer` driving its own input and `extra`
