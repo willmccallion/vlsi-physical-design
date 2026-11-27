@@ -461,7 +461,7 @@ fn a_segment_reads_its_steps_from_its_fields() {
     };
 
     let steps = (
-        (s.length_steps(), s.to_first_buffer(), s.after_last_buffer()),
+        (s.to_first_buffer(), s.after_last_buffer()),
         (s.load_steps(), s.input_cap_steps()),
         (s.output_slew_steps(), s.input_slew_steps()),
     );
@@ -469,7 +469,7 @@ fn a_segment_reads_its_steps_from_its_fields() {
     assert_eq!(
         steps,
         (
-            (LengthSteps(2), LengthSteps(7), LengthSteps(8)),
+            (LengthSteps(7), LengthSteps(8)),
             (CapSteps(3), CapSteps(5)),
             (SlewSteps(4), SlewSteps(6)),
         )
@@ -515,6 +515,13 @@ fn every_length_load_and_slew_of_a_table_files_its_own_segments() {
             }
         }
     }
+}
+
+#[test]
+fn a_lookup_past_eight_bits_wraps_as_tritoncts_does() {
+    let table = TechChar::from_segments(vec![keyed_segment(2, 3, 4, 5)], 1);
+
+    assert_eq!(delays_with(&table, 258, 259, 260), [5]);
 }
 
 #[test]
