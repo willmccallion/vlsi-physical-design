@@ -11,6 +11,7 @@ use pare_common::db::parser::{def, lef, liberty, sdc};
 use pare_common::db::sdc::Sdc;
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
 use pare_common::testing;
 use pare_common::units::{FaradsPerMeter, OhmsPerMeter, Seconds};
 use pare_cts::{
@@ -736,7 +737,18 @@ fn load_with_ram(text: &str) -> (NetlistDB, Liberty, Sdc) {
 }
 
 /// What synthesizing the trees of `db` did, with no wire length limit.
-fn synthesized_summary(mut db: NetlistDB, lib: &Liberty, constraints: &Sdc) -> CtsSummary {
+fn synthesized_summary(db: NetlistDB, lib: &Liberty, constraints: &Sdc) -> CtsSummary {
+    synthesized(db, lib, constraints, None).1
+}
+
+/// `db` with its trees synthesized for wires of at most `max_wire_length`,
+/// and their summary.
+fn synthesized(
+    mut db: NetlistDB,
+    lib: &Liberty,
+    constraints: &Sdc,
+    max_wire_length: Option<Dbu>,
+) -> (NetlistDB, CtsSummary) {
     let link = Link::new(&db, lib, &[]).unwrap();
     let clocks = clock_network(&db, &link, constraints);
     let input = CtsInput {
@@ -745,10 +757,82 @@ fn synthesized_summary(mut db: NetlistDB, lib: &Liberty, constraints: &Sdc) -> C
         clocks: &clocks,
         signal_rc: wire(&db, "metal2", 3.5, 0.1),
         clock_rc: wire(&db, "metal3", 1.5, 0.11),
-        max_wire_length: None,
+        max_wire_length,
         options: CtsOptions::default(),
     };
-    synthesize(&mut db, &input).unwrap().summary
+    let summary = synthesize(&mut db, &input).unwrap().summary;
+    (db, summary)
+}
+
+/// The wire length limit of the gate cloning tests, in database units.
+const CLONING_LIMIT: Dbu = Dbu::new(23_000);
+
+#[test]
+fn an_unplaced_flop_is_no_sink() {
+    let text =
+        design(4, 4, false).replace("- ff0 DFF_X1 + PLACED ( 4000 2000 ) N ;", "- ff0 DFF_X1 ;");
+    let (db, lib, constraints) = parsed(&text);
+
+    assert_eq!(synthesized_summary(db, &lib, &constraints).sinks, 15);
+}
+
+#[test]
+fn two_flops_behind_a_gate_get_a_tree_and_one_does_not() {
+    let trees = |direct| {
+        let (db, lib, constraints) = parsed(&gated_grid_text(direct));
+        synthesized_summary(db, &lib, &constraints).trees
+    };
+
+    assert_eq!(trees(2..256), trees(1..256) + 1);
+}
+
+#[test]
+fn a_clock_inverter_is_not_cloned_as_a_gate_is() {
+    let (db, lib, constraints) = parsed(&design(16, 16, true));
+
+    let (_, summary) = synthesized(db, &lib, &constraints, Some(CLONING_LIMIT));
+
+    assert_eq!(summary.clones, 0);
+}
+
+#[test]
+fn a_fixed_gate_is_not_cloned() {
+    let text = gated_grid_text(0..0).replace(
+        "- clkgate AND2_X1 + PLACED ( 2000 2000 )",
+        "- clkgate AND2_X1 + FIXED ( 2000 2000 )",
+    );
+    let (db, lib, constraints) = parsed(&text);
+
+    let (_, summary) = synthesized(db, &lib, &constraints, Some(CLONING_LIMIT));
+
+    assert_eq!(summary.clones, 0);
+}
+
+/// Where the gate of the gated grid placed at `at` ends up when its sinks
+/// are one cluster, no wire between them too long.
+fn gate_moved_from(at: Point<Dbu>) -> Point<Dbu> {
+    let text = gated_grid_text(0..0).replace(
+        "- clkgate AND2_X1 + PLACED ( 2000 2000 )",
+        &format!(
+            "- clkgate AND2_X1 + PLACED ( {} {} )",
+            at.x.get(),
+            at.y.get()
+        ),
+    );
+    let (db, lib, constraints) = parsed(&text);
+
+    let (db, _) = synthesized(db, &lib, &constraints, Some(Dbu::new(10_000_000)));
+
+    db.cells[db.cell_id("clkgate").unwrap()].location
+}
+
+#[test]
+fn a_gate_moved_onto_a_taken_spot_steps_right_of_it() {
+    let center = gate_moved_from(Point::new(Dbu::new(2000), Dbu::new(2000)));
+
+    let moved = gate_moved_from(center);
+
+    assert_eq!(moved, Point::new(center.x + Dbu::new(1), center.y));
 }
 
 #[test]
