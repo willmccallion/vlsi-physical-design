@@ -783,6 +783,44 @@ fn placing_shows_how_global_placement_ended_and_the_cells_legalization_moved() {
     assert!(!printed.contains("Zone "), "{printed}");
 }
 
+/// Writes the tiny design with its cells `u1` and `u2` fenced into the
+/// region `left` into `dir`, returning the DEF's path.
+fn write_fenced_tiny(dir: &Path) -> PathBuf {
+    let text = std::fs::read_to_string(fixture("tiny.def")).unwrap();
+    let fenced = text
+        .replace(
+            "COMPONENTS 8 ;",
+            "REGIONS 1 ;\n- left ( 0 0 ) ( 2000 4000 ) + TYPE FENCE ;\nEND REGIONS\n\nCOMPONENTS 8 ;",
+        )
+        .replace(
+            "END NETS\n",
+            "END NETS\n\nGROUPS 1 ;\n- left_cells u1 u2 + REGION left ;\nEND GROUPS\n",
+        );
+    let def = dir.join("fenced.def");
+    std::fs::write(&def, fenced).unwrap();
+    def
+}
+
+#[test]
+fn placing_a_fenced_design_shows_each_zone_of_global_placement() {
+    let dir = work_dir("fenced");
+    let config = write_config_parts(
+        &dir,
+        &ConfigParts {
+            purpose: "place_and_route",
+            input: tiny_input(&write_fenced_tiny(&dir)),
+            ..ConfigParts::default()
+        },
+    );
+
+    let output = pare(&[Path::new("place"), &config]);
+
+    let printed = printed(&output);
+    assert!(output.status.success(), "{printed}");
+    assert!(printed.contains("Zone left:"), "{printed}");
+    assert!(printed.contains("Zone outside fences:"), "{printed}");
+}
+
 #[test]
 fn detailed_routing_shows_the_counts_its_report_records() {
     let dir = work_dir("route-shown");
@@ -824,6 +862,26 @@ fn detailed_routing_shows_the_counts_its_report_records() {
 }
 
 #[test]
+fn checking_a_design_with_nothing_to_route_passes() {
+    let dir = work_dir("check-unconnected");
+    let config = write_config(&dir, "place_and_route", "");
+
+    let output = pare(&[
+        Path::new("check"),
+        &config,
+        Path::new("--placement"),
+        &fixture_of("cli", "unconnected_tiny.def"),
+    ]);
+
+    let printed = printed(&output);
+    assert!(output.status.success(), "{printed}");
+    assert!(
+        printed.contains("PASS Routing is connected and clean."),
+        "{printed}"
+    );
+}
+
+#[test]
 fn placing_a_timed_design_shows_what_each_repair_did() {
     let dir = work_dir("timed-shown");
     let config = write_timed_config(&dir, "");
@@ -850,6 +908,141 @@ fn placing_a_timed_design_shows_what_each_repair_did() {
         printed_stat(&printed, "Hold buffers:"),
         report["timing"]["hold_buffers"].to_string()
     );
+}
+
+#[test]
+fn design_repair_fixes_the_slew_and_load_a_resistive_wire_breaks() {
+    let dir = work_dir("resistive-repair");
+    let config = write_timed_run(
+        &dir,
+        &TimedRun {
+            signal_rc: (20_000.0, 50.0),
+            netlist: "clock_tree = false\nrepair_timing = false",
+            ..TimedRun::default()
+        },
+    );
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    let netlist = &read_report(&report)["netlist"];
+    assert!(
+        netlist["slew_violations"].as_u64().unwrap() > 0,
+        "{netlist}"
+    );
+    assert!(netlist["repeaters"].as_u64().unwrap() > 0, "{netlist}");
+}
+
+#[test]
+fn clock_nets_longer_than_a_buffer_drives_are_split_by_repeaters() {
+    let dir = work_dir("clock-repeaters");
+    let config = write_timed_run(
+        &dir,
+        &TimedRun {
+            signal_rc: (3_000.0, 10.0),
+            ..TimedRun::default()
+        },
+    );
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    let clock_tree = &read_report(&report)["clock_tree"];
+    assert!(
+        clock_tree["clock_net_repeaters"].as_u64().unwrap() > 0,
+        "{clock_tree}"
+    );
+}
+
+#[test]
+fn a_clock_inverter_is_cloned_before_the_clock_tree_is_built() {
+    let dir = work_dir("clock-inverter");
+    let config = write_timed_run(
+        &dir,
+        &TimedRun {
+            def: fixture_of("cli", "timed_chain.def"),
+            ..TimedRun::default()
+        },
+    );
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    assert_eq!(read_report(&report)["clock_tree"]["cloned_inverters"], 1);
+}
+
+#[test]
+fn timing_driven_placement_repairs_and_reweights_at_each_overflow_it_passes() {
+    let dir = work_dir("timing-driven");
+    let sdc = dir.join("tight.sdc");
+    std::fs::write(
+        &sdc,
+        "create_clock -name clk -period 0.05 [get_ports clk]\n",
+    )
+    .unwrap();
+    let config = write_timed_run(
+        &dir,
+        &TimedRun {
+            def: fixture_of("cli", "timed_chain.def"),
+            sdc,
+            global_placement: "timing_driven_overflows = [0.95]",
+            ..TimedRun::default()
+        },
+    );
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    assert_eq!(
+        read_report(&report)["placement"]["global"]["timing_rounds"],
+        1
+    );
+}
+
+/// Writes the timed fixture design with its I/O pins unplaced into `dir`,
+/// returning the DEF's path.
+fn write_unplaced_io_timed(dir: &Path) -> PathBuf {
+    let text = std::fs::read_to_string(fixture_of("cli", "timed.def")).unwrap();
+    let unplaced: Vec<String> = text
+        .lines()
+        .map(|line| match line.find(" + FIXED (") {
+            Some(at) if line.trim_start().starts_with("+ PORT") => format!("{} ;", &line[..at]),
+            _ => line.to_string(),
+        })
+        .collect();
+    let def = dir.join("unplaced_io.def");
+    std::fs::write(&def, unplaced.join("\n")).unwrap();
+    def
+}
+
+#[test]
+fn unplaced_io_pins_are_placed_after_a_placement_without_them() {
+    let dir = work_dir("io-placement");
+    let config = write_timed_run(
+        &dir,
+        &TimedRun {
+            def: write_unplaced_io_timed(&dir),
+            tables: "[io_placement]\nhorizontal_layer = \"metal3\"\nvertical_layer = \"metal2\"\n",
+            ..TimedRun::default()
+        },
+    );
+    let report = dir.join("report.json");
+
+    let output = pare(&[Path::new("place"), &config, Path::new("--report"), &report]);
+
+    assert!(output.status.success(), "{}", printed(&output));
+    let phases = phase_names(&read_report(&report));
+    assert_eq!(
+        phases[..2],
+        ["global placement without I/O", "I/O pin placement"]
+    );
+    let placed = std::fs::read_to_string(dir.join("placed.def")).unwrap();
+    let pins = &placed[placed.find("PINS 3 ;").unwrap()..placed.find("END PINS").unwrap()];
+    assert_eq!(pins.matches("+ PLACED").count(), 3, "{pins}");
 }
 
 #[test]

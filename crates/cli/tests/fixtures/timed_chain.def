@@ -1,0 +1,94 @@
+# Twelve flops chained through AND gates, the last six clocked through an
+# inverter, over the clock tree synthesis tests' cells: enough nets for
+# timing-driven placement to weight some, and a clock inverter to clone.
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN timed_chain ;
+UNITS DISTANCE MICRONS 2000 ;
+
+DIEAREA ( 0 0 ) ( 40000 40000 ) ;
+
+ROW ROW_0 core 2000 2000 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_1 core 2000 4800 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_2 core 2000 7600 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_3 core 2000 10400 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_4 core 2000 13200 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_5 core 2000 16000 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_6 core 2000 18800 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_7 core 2000 21600 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_8 core 2000 24400 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_9 core 2000 27200 FS DO 90 BY 1 STEP 380 0 ;
+ROW ROW_10 core 2000 30000 N DO 90 BY 1 STEP 380 0 ;
+ROW ROW_11 core 2000 32800 FS DO 90 BY 1 STEP 380 0 ;
+
+TRACKS Y 140 DO 142 STEP 280 LAYER metal1 ;
+TRACKS X 190 DO 105 STEP 380 LAYER metal2 ;
+TRACKS Y 140 DO 142 STEP 280 LAYER metal3 ;
+
+COMPONENTS 24 ;
+- ff0 DFF_X1 ;
+- ff1 DFF_X1 ;
+- ff2 DFF_X1 ;
+- ff3 DFF_X1 ;
+- ff4 DFF_X1 ;
+- ff5 DFF_X1 ;
+- ff6 DFF_X1 ;
+- ff7 DFF_X1 ;
+- ff8 DFF_X1 ;
+- ff9 DFF_X1 ;
+- ff10 DFF_X1 ;
+- ff11 DFF_X1 ;
+- g0 AND2_X1 ;
+- g1 AND2_X1 ;
+- g2 AND2_X1 ;
+- g3 AND2_X1 ;
+- g4 AND2_X1 ;
+- g5 AND2_X1 ;
+- g6 AND2_X1 ;
+- g7 AND2_X1 ;
+- g8 AND2_X1 ;
+- g9 AND2_X1 ;
+- g10 AND2_X1 ;
+- ci0 INV_X1 ;
+END COMPONENTS
+
+PINS 3 ;
+- clk + NET clk + DIRECTION INPUT + USE CLOCK
+  + PORT + LAYER metal2 ( -35 0 ) ( 35 70 ) + FIXED ( 10070 0 ) N ;
+- din + NET din + DIRECTION INPUT + USE SIGNAL
+  + PORT + LAYER metal2 ( -35 0 ) ( 35 70 ) + FIXED ( 20330 0 ) N ;
+- dout + NET dout + DIRECTION OUTPUT + USE SIGNAL
+  + PORT + LAYER metal2 ( -35 0 ) ( 35 70 ) + FIXED ( 30210 0 ) N ;
+END PINS
+
+NETS 26 ;
+- clk ( PIN clk ) ( ci0 A ) ( ff0 CK ) ( ff1 CK ) ( ff2 CK ) ( ff3 CK ) ( ff4 CK ) ( ff5 CK ) + USE CLOCK ;
+- clk_n ( ci0 ZN ) ( ff6 CK ) ( ff7 CK ) ( ff8 CK ) ( ff9 CK ) ( ff10 CK ) ( ff11 CK ) + USE CLOCK ;
+- din ( PIN din ) ( ff0 D ) ( g0 B ) ;
+- q0 ( ff0 Q ) ( g0 A ) ( g1 B ) ;
+- q1 ( ff1 Q ) ( g1 A ) ( g2 B ) ;
+- q2 ( ff2 Q ) ( g2 A ) ( g3 B ) ;
+- q3 ( ff3 Q ) ( g3 A ) ( g4 B ) ;
+- q4 ( ff4 Q ) ( g4 A ) ( g5 B ) ;
+- q5 ( ff5 Q ) ( g5 A ) ( g6 B ) ;
+- q6 ( ff6 Q ) ( g6 A ) ( g7 B ) ;
+- q7 ( ff7 Q ) ( g7 A ) ( g8 B ) ;
+- q8 ( ff8 Q ) ( g8 A ) ( g9 B ) ;
+- q9 ( ff9 Q ) ( g9 A ) ( g10 B ) ;
+- q10 ( ff10 Q ) ( g10 A ) ;
+- dout ( ff11 Q ) ( PIN dout ) ;
+- n0 ( g0 Z ) ( ff1 D ) ;
+- n1 ( g1 Z ) ( ff2 D ) ;
+- n2 ( g2 Z ) ( ff3 D ) ;
+- n3 ( g3 Z ) ( ff4 D ) ;
+- n4 ( g4 Z ) ( ff5 D ) ;
+- n5 ( g5 Z ) ( ff6 D ) ;
+- n6 ( g6 Z ) ( ff7 D ) ;
+- n7 ( g7 Z ) ( ff8 D ) ;
+- n8 ( g8 Z ) ( ff9 D ) ;
+- n9 ( g9 Z ) ( ff10 D ) ;
+- n10 ( g10 Z ) ( ff11 D ) ;
+END NETS
+
+END DESIGN
