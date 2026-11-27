@@ -1,0 +1,300 @@
+GridBox([7, 3, 9, 7]) at TreePoint { x: 8.5, y: 5.0 } taken [1, 2, 3, 4, 7, 8, 9, 10] -> TreePoint { x: 9.0, y: 4.0 }
+GridBox([15, 4, 20, 6]) at TreePoint { x: 18.75, y: 5.0 } taken [0, 1, 2, 3, 7, 8, 10, 11] -> TreePoint { x: 18.75, y: 6.0 }
+GridBox([3, 15, 5, 18]) at TreePoint { x: 4.5, y: 17.25 } taken [0, 1, 3, 5, 6, 7, 8, 10] -> TreePoint { x: 4.5, y: 18.0 }
+GridBox([9, 9, 11, 14]) at TreePoint { x: 10.5, y: 11.5 } taken [0, 1, 3, 6, 7, 8, 9, 10] -> TreePoint { x: 11.0, y: 12.5 }
+GridBox([13, 2, 18, 3]) at TreePoint { x: 14.25, y: 2.75 } taken [0, 2, 3, 4, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 11.0, y: 3.75 }
+GridBox([1, 0, 5, 3]) at TreePoint { x: 3.0, y: 2.25 } taken [0, 2, 4, 5, 6, 7, 8, 9, 11] -> TreePoint { x: 5.0, y: 2.25 }
+GridBox([14, 15, 19, 18]) at TreePoint { x: 15.25, y: 15.75 } taken [0, 1, 3, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 12.0, y: 14.75 }
+GridBox([12, 6, 16, 11]) at TreePoint { x: 14.0, y: 7.25 } taken [2, 4, 5, 8, 9, 10, 11] -> TreePoint { x: 16.0, y: 7.25 }
+GridBox([4, 13, 9, 16]) at TreePoint { x: 6.5, y: 13.75 } taken [0, 1, 2, 3, 4, 5, 6, 11] -> TreePoint { x: 6.5, y: 16.0 }
+GridBox([5, 8, 10, 11]) at TreePoint { x: 7.5, y: 10.25 } taken [0, 8, 9, 10] -> TreePoint { x: 10.0, y: 10.25 }
+GridBox([4, 14, 8, 16]) at TreePoint { x: 5.0, y: 14.5 } taken [1, 2, 3, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 2.0, y: 14.5 }
+GridBox([2, 3, 3, 6]) at TreePoint { x: 2.5, y: 3.75 } taken [1, 2, 4, 5, 6, 7, 9, 10] -> TreePoint { x: 3.0, y: 3.75 }
+GridBox([8, 7, 11, 8]) at TreePoint { x: 10.25, y: 7.5 } taken [0, 1, 3, 4, 5, 6, 8, 9, 10] -> TreePoint { x: 8.25, y: 8.0 }
+GridBox([0, 4, 2, 7]) at TreePoint { x: 1.0, y: 4.75 } taken [1, 2, 3, 10, 11] -> TreePoint { x: 1.0, y: 3.0 }
+GridBox([4, 11, 9, 12]) at TreePoint { x: 6.5, y: 11.5 } taken [0, 1, 4, 5, 7, 8, 10] -> TreePoint { x: 6.5, y: 12.0 }
+GridBox([4, 4, 7, 7]) at TreePoint { x: 6.25, y: 5.5 } taken [1, 2, 3, 4, 5, 6, 7, 8, 10] -> TreePoint { x: 6.25, y: 7.0 }
+GridBox([5, 8, 8, 13]) at TreePoint { x: 6.5, y: 9.25 } taken [1, 2, 3, 4, 7, 8, 10, 11] -> TreePoint { x: 6.5, y: 7.0 }
+GridBox([13, 14, 15, 19]) at TreePoint { x: 14.0, y: 17.75 } taken [2, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 15.0, y: 17.75 }
+GridBox([7, 3, 11, 8]) at TreePoint { x: 9.0, y: 4.25 } taken [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 7.0, y: 8.0 }
+GridBox([0, 12, 4, 16]) at TreePoint { x: 3.0, y: 14.0 } taken [3, 5, 6, 7, 11] -> TreePoint { x: 4.0, y: 15.0 }
+GridBox([0, 6, 3, 8]) at TreePoint { x: 2.25, y: 6.5 } taken [0, 1, 2, 3, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 3.0, y: 7.5 }
+GridBox([11, 9, 14, 13]) at TreePoint { x: 13.25, y: 12.0 } taken [0, 2, 3, 4, 5, 6, 7, 9] -> TreePoint { x: 15.25, y: 13.0 }
+GridBox([3, 11, 6, 14]) at TreePoint { x: 5.25, y: 11.75 } taken [0, 1, 2, 3, 4, 6, 7, 8, 9, 10] -> TreePoint { x: 6.0, y: 10.75 }
+GridBox([2, 12, 7, 13]) at TreePoint { x: 3.25, y: 12.75 } taken [1, 2, 4, 5] -> TreePoint { x: 3.25, y: 13.0 }
+GridBox([4, 12, 6, 13]) at TreePoint { x: 5.0, y: 12.25 } taken [0, 1, 3, 5, 6, 7, 8, 10, 11] -> TreePoint { x: 5.0, y: 13.0 }
+GridBox([6, 7, 10, 8]) at TreePoint { x: 8.0, y: 7.25 } taken [0, 1, 2, 3, 4, 5, 6, 8, 11] -> TreePoint { x: 8.0, y: 8.0 }
+GridBox([8, 2, 9, 5]) at TreePoint { x: 8.75, y: 4.25 } taken [3, 4, 5, 6, 7, 9, 10] -> TreePoint { x: 6.0, y: 4.25 }
+GridBox([7, 10, 12, 12]) at TreePoint { x: 10.75, y: 11.5 } taken [1, 3, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 12.0, y: 12.5 }
+GridBox([4, 2, 5, 6]) at TreePoint { x: 4.5, y: 4.0 } taken [0, 1, 2, 4, 5, 7, 8, 10, 11] -> TreePoint { x: 5.0, y: 4.0 }
+GridBox([2, 7, 6, 8]) at TreePoint { x: 4.0, y: 7.75 } taken [1, 3, 5, 6, 7, 9, 10, 11] -> TreePoint { x: 6.0, y: 8.75 }
+GridBox([7, 4, 12, 9]) at TreePoint { x: 10.75, y: 7.75 } taken [0, 2, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 12.0, y: 7.75 }
+GridBox([15, 13, 17, 18]) at TreePoint { x: 16.0, y: 16.75 } taken [1, 2, 3, 6, 11] -> TreePoint { x: 16.0, y: 18.0 }
+GridBox([13, 10, 14, 15]) at TreePoint { x: 13.75, y: 13.75 } taken [2, 3, 4, 7, 8, 9, 11] -> TreePoint { x: 14.0, y: 12.75 }
+GridBox([14, 2, 17, 3]) at TreePoint { x: 16.25, y: 2.25 } taken [0, 1, 2, 4, 5, 6, 7, 8, 11] -> TreePoint { x: 17.0, y: 2.25 }
+GridBox([1, 9, 6, 11]) at TreePoint { x: 2.25, y: 10.0 } taken [0, 6, 7, 8, 9, 11] -> TreePoint { x: 4.25, y: 11.0 }
+GridBox([11, 15, 13, 16]) at TreePoint { x: 11.5, y: 15.25 } taken [0, 2, 4, 5, 7, 9] -> TreePoint { x: 11.5, y: 14.0 }
+GridBox([10, 15, 12, 17]) at TreePoint { x: 10.5, y: 16.0 } taken [0, 1, 2, 3, 4, 5, 6, 11] -> TreePoint { x: 10.5, y: 17.0 }
+GridBox([5, 7, 9, 9]) at TreePoint { x: 6.0, y: 8.5 } taken [1, 2, 3, 6, 8, 9, 10, 11] -> TreePoint { x: 3.0, y: 8.5 }
+GridBox([14, 14, 16, 15]) at TreePoint { x: 15.5, y: 14.25 } taken [0, 1, 3, 5, 6, 9, 10, 11] -> TreePoint { x: 16.0, y: 15.25 }
+GridBox([9, 4, 10, 7]) at TreePoint { x: 9.75, y: 4.75 } taken [1, 4, 5, 7, 10, 11] -> TreePoint { x: 10.0, y: 4.75 }
+GridBox([14, 6, 15, 10]) at TreePoint { x: 14.5, y: 7.0 } taken [0, 1, 6, 7, 8, 9, 10] -> TreePoint { x: 15.0, y: 7.0 }
+GridBox([11, 5, 14, 9]) at TreePoint { x: 11.75, y: 8.0 } taken [0, 1, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 14.0, y: 8.0 }
+GridBox([15, 14, 20, 17]) at TreePoint { x: 16.25, y: 15.5 } taken [0, 4, 5, 8, 9, 10, 11] -> TreePoint { x: 16.25, y: 13.0 }
+GridBox([6, 7, 9, 11]) at TreePoint { x: 7.5, y: 9.0 } taken [0, 1, 2, 3, 4, 5, 7, 9, 11] -> TreePoint { x: 7.5, y: 6.0 }
+GridBox([9, 15, 12, 19]) at TreePoint { x: 10.5, y: 18.0 } taken [1, 2, 5, 6, 9, 10, 11] -> TreePoint { x: 12.0, y: 18.0 }
+GridBox([10, 7, 11, 12]) at TreePoint { x: 10.5, y: 9.5 } taken [0, 3, 4, 5, 6, 7, 9, 11] -> TreePoint { x: 8.0, y: 10.5 }
+GridBox([8, 14, 10, 17]) at TreePoint { x: 9.0, y: 14.75 } taken [0, 1, 3, 4, 7, 8, 9, 10, 11] -> TreePoint { x: 9.0, y: 13.0 }
+GridBox([5, 8, 7, 13]) at TreePoint { x: 5.5, y: 11.75 } taken [0, 1, 2, 3, 6, 8, 10, 11] -> TreePoint { x: 5.5, y: 13.0 }
+GridBox([5, 2, 10, 3]) at TreePoint { x: 8.75, y: 2.25 } taken [0, 1, 2, 3, 5, 7, 8, 9, 11] -> TreePoint { x: 8.75, y: 1.0 }
+GridBox([15, 14, 16, 18]) at TreePoint { x: 15.25, y: 15.0 } taken [0, 2, 4, 5, 7, 8, 9] -> TreePoint { x: 16.0, y: 15.0 }
+GridBox([9, 5, 10, 9]) at TreePoint { x: 9.5, y: 7.0 } taken [0, 1, 2, 5, 6, 7, 9, 10, 11] -> TreePoint { x: 10.0, y: 7.0 }
+GridBox([8, 8, 10, 11]) at TreePoint { x: 8.5, y: 9.5 } taken [1, 2, 3, 4, 5, 6, 7, 9, 10] -> TreePoint { x: 6.0, y: 9.5 }
+GridBox([13, 0, 18, 2]) at TreePoint { x: 16.75, y: 1.0 } taken [1, 2, 3, 4, 5, 7, 8, 11] -> TreePoint { x: 16.75, y: 2.0 }
+GridBox([0, 2, 4, 3]) at TreePoint { x: 2.0, y: 2.5 } taken [0, 2, 3, 4, 5, 6, 8, 10] -> TreePoint { x: 2.0, y: 3.0 }
+GridBox([0, 5, 5, 7]) at TreePoint { x: 2.5, y: 6.5 } taken [1, 2, 3, 4, 5, 6, 7, 8, 9] -> TreePoint { x: 4.5, y: 7.0 }
+GridBox([10, 10, 15, 14]) at TreePoint { x: 11.25, y: 13.0 } taken [1, 3, 4, 6, 8, 9, 10] -> TreePoint { x: 9.25, y: 14.0 }
+GridBox([12, 3, 14, 5]) at TreePoint { x: 13.5, y: 4.5 } taken [0, 2, 3, 4, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 14.0, y: 3.5 }
+GridBox([7, 1, 8, 5]) at TreePoint { x: 7.75, y: 3.0 } taken [0, 1, 2, 3, 7, 9, 10] -> TreePoint { x: 8.0, y: 4.0 }
+GridBox([15, 12, 16, 16]) at TreePoint { x: 15.25, y: 15.0 } taken [1, 2, 4, 6, 7, 8, 11] -> TreePoint { x: 16.0, y: 15.0 }
+GridBox([14, 12, 16, 15]) at TreePoint { x: 15.5, y: 13.5 } taken [0, 1, 3, 4, 9, 10, 11] -> TreePoint { x: 16.0, y: 12.5 }
+GridBox([3, 12, 7, 13]) at TreePoint { x: 6.0, y: 12.5 } taken [0, 1, 2, 3, 4, 5, 6, 7, 10] -> TreePoint { x: 6.0, y: 13.0 }
+GridBox([13, 8, 17, 12]) at TreePoint { x: 15.0, y: 9.0 } taken [1, 3, 4, 5, 6, 7, 8, 10, 11] -> TreePoint { x: 15.0, y: 12.0 }
+GridBox([2, 5, 4, 9]) at TreePoint { x: 3.0, y: 8.0 } taken [2, 5, 6, 8, 10, 11] -> TreePoint { x: 4.0, y: 8.0 }
+GridBox([4, 8, 8, 10]) at TreePoint { x: 6.0, y: 8.5 } taken [0, 6, 8, 9, 10] -> TreePoint { x: 8.0, y: 8.5 }
+GridBox([8, 11, 13, 14]) at TreePoint { x: 9.25, y: 12.5 } taken [2, 4, 5, 8] -> TreePoint { x: 9.25, y: 14.0 }
+GridBox([4, 11, 6, 14]) at TreePoint { x: 5.5, y: 13.25 } taken [4, 5, 10, 11] -> TreePoint { x: 6.0, y: 13.25 }
+GridBox([0, 11, 1, 16]) at TreePoint { x: 0.25, y: 12.25 } taken [1, 3, 4, 5, 6, 7, 11] -> TreePoint { x: -2.0, y: 12.25 }
+GridBox([5, 14, 10, 17]) at TreePoint { x: 6.25, y: 15.5 } taken [0, 2, 3, 4, 7, 8, 9, 10] -> TreePoint { x: 6.25, y: 13.0 }
+GridBox([0, 7, 4, 9]) at TreePoint { x: 3.0, y: 8.5 } taken [0, 2, 3, 4, 5, 6, 8, 9, 10] -> TreePoint { x: 1.0, y: 9.0 }
+GridBox([11, 11, 13, 12]) at TreePoint { x: 12.5, y: 11.25 } taken [0, 1, 3, 4, 7, 10, 11] -> TreePoint { x: 12.5, y: 12.0 }
+GridBox([7, 6, 9, 10]) at TreePoint { x: 8.5, y: 8.0 } taken [2, 3, 5, 6, 8, 9, 10] -> TreePoint { x: 9.0, y: 9.0 }
+GridBox([11, 0, 13, 4]) at TreePoint { x: 12.5, y: 2.0 } taken [1, 4, 5, 6, 10, 11] -> TreePoint { x: 13.0, y: 2.0 }
+GridBox([6, 4, 7, 7]) at TreePoint { x: 6.5, y: 5.5 } taken [1, 2, 3, 4, 5, 6, 7, 9, 10] -> TreePoint { x: 4.0, y: 5.5 }
+GridBox([13, 9, 17, 11]) at TreePoint { x: 16.0, y: 9.5 } taken [0, 1, 2, 3, 5, 8, 9, 10, 11] -> TreePoint { x: 16.0, y: 8.0 }
+GridBox([2, 15, 6, 16]) at TreePoint { x: 3.0, y: 15.25 } taken [1, 2, 3, 5, 6, 8, 9, 10, 11] -> TreePoint { x: 0.0, y: 15.25 }
+GridBox([8, 6, 9, 10]) at TreePoint { x: 8.5, y: 7.0 } taken [1, 2, 3, 4, 6, 9, 10, 11] -> TreePoint { x: 9.0, y: 6.0 }
+GridBox([5, 14, 7, 18]) at TreePoint { x: 6.5, y: 15.0 } taken [0, 1, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 7.0, y: 15.0 }
+GridBox([1, 13, 6, 15]) at TreePoint { x: 4.75, y: 14.5 } taken [0, 1, 2, 3, 5, 6, 7, 8, 9] -> TreePoint { x: 6.0, y: 15.5 }
+GridBox([10, 5, 12, 10]) at TreePoint { x: 11.0, y: 6.25 } taken [0, 1, 4, 6, 9, 10] -> TreePoint { x: 12.0, y: 6.25 }
+GridBox([6, 3, 7, 4]) at TreePoint { x: 6.5, y: 3.25 } taken [0, 3, 4, 5, 9, 10, 11] -> TreePoint { x: 6.5, y: 2.0 }
+GridBox([0, 11, 5, 16]) at TreePoint { x: 2.5, y: 13.5 } taken [0, 1, 2, 3, 4, 5, 6, 9, 10, 11] -> TreePoint { x: 4.5, y: 10.0 }
+GridBox([11, 10, 13, 15]) at TreePoint { x: 11.5, y: 11.25 } taken [0, 1, 3, 4, 5, 6, 7, 10, 11] -> TreePoint { x: 9.0, y: 10.25 }
+GridBox([7, 0, 10, 4]) at TreePoint { x: 9.25, y: 1.0 } taken [1, 2, 3, 5, 6, 10] -> TreePoint { x: 10.0, y: 2.0 }
+GridBox([6, 6, 8, 9]) at TreePoint { x: 7.0, y: 7.5 } taken [0, 1, 2, 3, 4, 6, 8, 9, 10, 11] -> TreePoint { x: 8.0, y: 6.5 }
+GridBox([5, 13, 7, 17]) at TreePoint { x: 6.0, y: 16.0 } taken [0, 1, 3, 6, 7, 8] -> TreePoint { x: 6.0, y: 17.0 }
+GridBox([7, 10, 11, 11]) at TreePoint { x: 9.0, y: 10.25 } taken [2, 4, 5, 6, 8, 9, 10, 11] -> TreePoint { x: 11.0, y: 10.25 }
+GridBox([0, 2, 5, 6]) at TreePoint { x: 3.75, y: 5.0 } taken [0, 1, 2, 4, 5, 7] -> TreePoint { x: 3.75, y: 6.0 }
+GridBox([2, 3, 5, 8]) at TreePoint { x: 2.75, y: 4.25 } taken [0, 1, 3, 5, 6, 7, 9, 10] -> TreePoint { x: 5.0, y: 5.25 }
+GridBox([1, 1, 5, 4]) at TreePoint { x: 2.0, y: 3.25 } taken [0, 1, 2, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 0.0, y: 4.0 }
+GridBox([15, 9, 20, 13]) at TreePoint { x: 17.5, y: 11.0 } taken [0, 1, 3, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 15.5, y: 13.0 }
+GridBox([12, 3, 16, 7]) at TreePoint { x: 15.0, y: 5.0 } taken [0, 1, 2, 4, 7, 8] -> TreePoint { x: 16.0, y: 5.0 }
+GridBox([4, 13, 5, 14]) at TreePoint { x: 4.5, y: 13.25 } taken [1, 2, 3, 4, 7, 8, 9, 11] -> TreePoint { x: 4.5, y: 12.0 }
+GridBox([1, 9, 2, 13]) at TreePoint { x: 1.5, y: 11.0 } taken [0, 1, 2, 4, 6, 7, 9, 10, 11] -> TreePoint { x: 2.0, y: 11.0 }
+GridBox([9, 1, 11, 6]) at TreePoint { x: 10.5, y: 2.25 } taken [0, 1, 3, 4, 5, 6, 10, 11] -> TreePoint { x: 10.5, y: 6.0 }
+GridBox([13, 11, 16, 16]) at TreePoint { x: 15.25, y: 13.5 } taken [5, 6, 8, 9, 10, 11] -> TreePoint { x: 16.0, y: 13.5 }
+GridBox([1, 7, 3, 11]) at TreePoint { x: 1.5, y: 8.0 } taken [5, 6, 7, 8, 9] -> TreePoint { x: 3.0, y: 8.0 }
+GridBox([11, 12, 16, 14]) at TreePoint { x: 12.25, y: 13.0 } taken [1, 3, 6, 7, 9, 10] -> TreePoint { x: 10.25, y: 14.0 }
+GridBox([5, 8, 8, 10]) at TreePoint { x: 6.5, y: 9.0 } taken [0, 1, 2, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 8.0, y: 9.0 }
+GridBox([2, 12, 3, 16]) at TreePoint { x: 2.75, y: 15.0 } taken [0, 1, 3, 4, 7, 11] -> TreePoint { x: 2.75, y: 16.0 }
+GridBox([8, 8, 12, 9]) at TreePoint { x: 9.0, y: 8.75 } taken [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 12.0, y: 8.75 }
+GridBox([15, 8, 19, 10]) at TreePoint { x: 16.0, y: 9.5 } taken [0, 1, 2, 5, 6, 8, 11] -> TreePoint { x: 16.0, y: 10.0 }
+GridBox([10, 2, 11, 4]) at TreePoint { x: 10.25, y: 2.5 } taken [1, 2, 3, 4, 7, 9] -> TreePoint { x: 10.25, y: 1.0 }
+GridBox([14, 15, 16, 20]) at TreePoint { x: 14.5, y: 16.25 } taken [0, 2, 3, 4, 5, 6, 7, 9, 10, 11] -> TreePoint { x: 12.0, y: 17.25 }
+GridBox([14, 10, 15, 14]) at TreePoint { x: 14.75, y: 11.0 } taken [0, 1, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 15.0, y: 11.0 }
+GridBox([11, 11, 16, 16]) at TreePoint { x: 12.25, y: 14.75 } taken [2, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 9.0, y: 14.75 }
+GridBox([9, 12, 10, 16]) at TreePoint { x: 9.25, y: 14.0 } taken [1, 4, 6, 7, 8, 9, 11] -> TreePoint { x: 10.0, y: 14.0 }
+GridBox([0, 12, 4, 15]) at TreePoint { x: 2.0, y: 14.25 } taken [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 2.0, y: 11.0 }
+GridBox([11, 10, 15, 15]) at TreePoint { x: 13.0, y: 11.25 } taken [0, 1, 2, 3, 5, 6, 7, 8, 10, 11] -> TreePoint { x: 15.0, y: 12.25 }
+GridBox([10, 13, 14, 18]) at TreePoint { x: 11.0, y: 15.5 } taken [0, 1, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 14.0, y: 15.5 }
+GridBox([2, 3, 4, 5]) at TreePoint { x: 2.5, y: 3.5 } taken [2, 3, 4, 5, 6, 7, 8, 9, 11] -> TreePoint { x: 0.0, y: 3.5 }
+GridBox([8, 7, 12, 10]) at TreePoint { x: 10.0, y: 8.5 } taken [0, 1, 2, 4, 6, 10, 11] -> TreePoint { x: 10.0, y: 10.0 }
+GridBox([3, 8, 5, 13]) at TreePoint { x: 4.5, y: 10.5 } taken [0, 2, 3, 4, 5, 6, 7, 8, 11] -> TreePoint { x: 4.5, y: 13.0 }
+GridBox([11, 6, 15, 10]) at TreePoint { x: 14.0, y: 7.0 } taken [0, 1, 3, 5, 7, 10] -> TreePoint { x: 15.0, y: 8.0 }
+GridBox([3, 11, 7, 14]) at TreePoint { x: 5.0, y: 11.75 } taken [0, 1, 2, 3, 4, 6, 7, 10, 11] -> TreePoint { x: 5.0, y: 14.0 }
+GridBox([0, 6, 1, 9]) at TreePoint { x: 0.25, y: 7.5 } taken [3, 4, 9, 10, 11] -> TreePoint { x: 1.0, y: 6.5 }
+GridBox([12, 12, 17, 15]) at TreePoint { x: 15.75, y: 14.25 } taken [0, 1, 2, 3, 5, 6, 7, 9, 11] -> TreePoint { x: 17.0, y: 15.25 }
+GridBox([3, 11, 6, 13]) at TreePoint { x: 4.5, y: 12.0 } taken [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 6.0, y: 12.0 }
+GridBox([10, 11, 14, 12]) at TreePoint { x: 12.0, y: 11.25 } taken [1, 2, 3, 4, 7, 8, 9, 11] -> TreePoint { x: 12.0, y: 10.0 }
+GridBox([0, 1, 1, 4]) at TreePoint { x: 0.5, y: 2.5 } taken [1, 5, 6, 7, 9, 10, 11] -> TreePoint { x: 1.0, y: 2.5 }
+GridBox([3, 11, 5, 14]) at TreePoint { x: 3.5, y: 13.25 } taken [0, 1, 2, 3, 6, 7, 10, 11] -> TreePoint { x: 3.5, y: 14.0 }
+GridBox([7, 13, 10, 14]) at TreePoint { x: 7.75, y: 13.25 } taken [0, 1, 3, 4, 7, 8, 10] -> TreePoint { x: 7.75, y: 14.0 }
+GridBox([14, 12, 16, 15]) at TreePoint { x: 15.5, y: 13.5 } taken [0, 1, 3, 6, 7, 10, 11] -> TreePoint { x: 16.0, y: 14.5 }
+GridBox([4, 12, 5, 17]) at TreePoint { x: 4.5, y: 14.5 } taken [1, 3, 4, 5, 6, 8, 9, 10] -> TreePoint { x: 2.0, y: 14.5 }
+GridBox([5, 15, 10, 19]) at TreePoint { x: 8.75, y: 16.0 } taken [0, 1, 2, 3, 5, 6, 7, 8, 10] -> TreePoint { x: 10.0, y: 17.0 }
+GridBox([12, 10, 14, 11]) at TreePoint { x: 13.0, y: 10.5 } taken [0, 1, 2, 3, 4, 5, 6, 7, 8, 11] -> TreePoint { x: 13.0, y: 11.0 }
+GridBox([15, 9, 19, 10]) at TreePoint { x: 18.0, y: 9.25 } taken [2, 3, 4, 6, 8, 9, 11] -> TreePoint { x: 19.0, y: 8.25 }
+GridBox([15, 12, 17, 17]) at TreePoint { x: 15.5, y: 14.5 } taken [2, 3, 5, 7, 8, 9] -> TreePoint { x: 13.0, y: 14.5 }
+GridBox([0, 3, 1, 6]) at TreePoint { x: 0.75, y: 4.5 } taken [0, 1, 3, 4, 5, 6, 7, 9, 10] -> TreePoint { x: -1.25, y: 6.0 }
+GridBox([1, 8, 6, 11]) at TreePoint { x: 2.25, y: 10.25 } taken [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 2.25, y: 10.25 }
+GridBox([6, 10, 11, 15]) at TreePoint { x: 9.75, y: 13.75 } taken [0, 1, 2, 4, 6, 8, 10] -> TreePoint { x: 11.0, y: 13.75 }
+GridBox([11, 11, 16, 16]) at TreePoint { x: 14.75, y: 12.25 } taken [0, 1, 2, 3, 4, 5, 8, 9, 10] -> TreePoint { x: 14.75, y: 10.0 }
+GridBox([1, 14, 2, 17]) at TreePoint { x: 1.25, y: 14.75 } taken [0, 1, 2, 3, 4, 5, 6, 8, 11] -> TreePoint { x: 1.25, y: 17.0 }
+GridBox([2, 7, 7, 8]) at TreePoint { x: 5.75, y: 7.5 } taken [0, 1, 2, 3, 4, 6, 7, 9] -> TreePoint { x: 7.0, y: 6.5 }
+GridBox([11, 14, 13, 18]) at TreePoint { x: 11.5, y: 16.0 } taken [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 11.5, y: 16.0 }
+GridBox([1, 6, 3, 10]) at TreePoint { x: 1.5, y: 7.0 } taken [1, 2, 3, 7, 8, 9, 10, 11] -> TreePoint { x: 1.5, y: 5.0 }
+GridBox([12, 5, 15, 9]) at TreePoint { x: 14.25, y: 8.0 } taken [2, 7, 10, 11] -> TreePoint { x: 15.0, y: 8.0 }
+GridBox([11, 12, 13, 17]) at TreePoint { x: 11.5, y: 14.5 } taken [2, 7, 8, 9, 10] -> TreePoint { x: 13.0, y: 14.5 }
+GridBox([6, 7, 9, 12]) at TreePoint { x: 8.25, y: 10.75 } taken [0, 2, 5, 7, 9, 10] -> TreePoint { x: 9.0, y: 10.75 }
+GridBox([7, 14, 11, 17]) at TreePoint { x: 9.0, y: 16.25 } taken [0, 2, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 11.0, y: 16.25 }
+GridBox([9, 2, 11, 6]) at TreePoint { x: 10.5, y: 3.0 } taken [0, 1, 3, 5, 8, 10, 11] -> TreePoint { x: 11.0, y: 4.0 }
+GridBox([14, 11, 19, 12]) at TreePoint { x: 15.25, y: 11.25 } taken [1, 3, 4, 6, 8, 9, 11] -> TreePoint { x: 17.25, y: 12.0 }
+GridBox([6, 14, 11, 18]) at TreePoint { x: 7.25, y: 17.0 } taken [0, 1, 2, 3, 4, 7, 9, 10] -> TreePoint { x: 5.25, y: 18.0 }
+GridBox([12, 0, 17, 5]) at TreePoint { x: 15.75, y: 1.25 } taken [0, 1, 2, 5, 6, 7, 8, 10] -> TreePoint { x: 17.0, y: 1.25 }
+GridBox([0, 15, 2, 20]) at TreePoint { x: 0.5, y: 16.25 } taken [0, 1, 3, 5, 7, 9, 10, 11] -> TreePoint { x: 0.5, y: 14.0 }
+GridBox([0, 13, 5, 16]) at TreePoint { x: 2.5, y: 13.75 } taken [0, 1, 2, 3, 5, 7, 10, 11] -> TreePoint { x: 2.5, y: 12.0 }
+GridBox([9, 4, 14, 9]) at TreePoint { x: 12.75, y: 7.75 } taken [0, 1, 3, 4, 6, 7, 9, 10] -> TreePoint { x: 14.0, y: 6.75 }
+GridBox([5, 11, 8, 12]) at TreePoint { x: 6.5, y: 11.75 } taken [1, 2, 3, 4, 5, 6, 9, 10] -> TreePoint { x: 4.5, y: 12.0 }
+GridBox([8, 11, 11, 16]) at TreePoint { x: 9.5, y: 14.75 } taken [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 6.0, y: 15.75 }
+GridBox([12, 13, 17, 14]) at TreePoint { x: 15.75, y: 13.5 } taken [1, 2, 3, 5, 6, 7, 8, 10] -> TreePoint { x: 15.75, y: 14.0 }
+GridBox([12, 11, 16, 16]) at TreePoint { x: 15.0, y: 13.5 } taken [0, 1, 3, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 16.0, y: 14.5 }
+GridBox([3, 11, 5, 16]) at TreePoint { x: 4.5, y: 13.5 } taken [0, 1, 2, 4, 5, 6, 7, 8, 9, 11] -> TreePoint { x: 5.0, y: 13.5 }
+GridBox([3, 7, 5, 11]) at TreePoint { x: 4.5, y: 10.0 } taken [0, 1, 3, 4, 5, 6, 8, 9, 10, 11] -> TreePoint { x: 1.0, y: 9.0 }
+GridBox([0, 9, 3, 14]) at TreePoint { x: 2.25, y: 12.75 } taken [0, 1, 2, 3, 5, 8, 9, 11] -> TreePoint { x: 3.0, y: 13.75 }
+GridBox([11, 8, 13, 10]) at TreePoint { x: 12.5, y: 9.5 } taken [0, 1, 3, 4, 6, 10, 11] -> TreePoint { x: 12.5, y: 10.0 }
+GridBox([6, 12, 10, 16]) at TreePoint { x: 9.0, y: 15.0 } taken [4, 7, 9, 10] -> TreePoint { x: 10.0, y: 15.0 }
+GridBox([13, 5, 17, 7]) at TreePoint { x: 16.0, y: 6.5 } taken [1, 2, 3, 5, 6, 7, 8, 11] -> TreePoint { x: 16.0, y: 7.0 }
+GridBox([7, 14, 10, 19]) at TreePoint { x: 9.25, y: 15.25 } taken [0, 1, 3, 5, 6, 8, 9, 10, 11] -> TreePoint { x: 10.0, y: 16.25 }
+GridBox([1, 9, 3, 10]) at TreePoint { x: 2.5, y: 9.75 } taken [0, 1, 2, 3, 4, 6] -> TreePoint { x: 2.5, y: 10.0 }
+GridBox([13, 0, 14, 4]) at TreePoint { x: 13.5, y: 1.0 } taken [0, 1, 2, 3, 4, 5, 6, 7] -> TreePoint { x: 13.5, y: 4.0 }
+GridBox([8, 14, 9, 18]) at TreePoint { x: 8.25, y: 15.0 } taken [0, 1, 2, 4, 5, 6, 7, 8] -> TreePoint { x: 9.0, y: 15.0 }
+GridBox([0, 13, 5, 14]) at TreePoint { x: 1.25, y: 13.5 } taken [1, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: -2.0, y: 13.5 }
+GridBox([15, 11, 17, 14]) at TreePoint { x: 16.5, y: 12.5 } taken [0, 1, 2, 4, 5, 7, 8, 9, 10] -> TreePoint { x: 17.0, y: 12.5 }
+GridBox([3, 13, 7, 15]) at TreePoint { x: 6.0, y: 14.0 } taken [0, 1, 2, 4, 7, 9, 10, 11] -> TreePoint { x: 7.0, y: 14.0 }
+GridBox([8, 9, 13, 13]) at TreePoint { x: 11.75, y: 11.0 } taken [0, 3, 4, 5, 6, 7, 8, 10, 11] -> TreePoint { x: 11.75, y: 13.0 }
+GridBox([3, 15, 5, 20]) at TreePoint { x: 3.5, y: 16.25 } taken [0, 1, 2, 3, 5, 6, 7, 8, 9] -> TreePoint { x: 5.0, y: 17.25 }
+GridBox([1, 1, 2, 5]) at TreePoint { x: 1.5, y: 2.0 } taken [0, 1, 4, 5, 7, 9, 11] -> TreePoint { x: 2.0, y: 2.0 }
+GridBox([0, 7, 5, 12]) at TreePoint { x: 2.5, y: 10.75 } taken [1, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: -2.0, y: 10.75 }
+GridBox([2, 15, 4, 18]) at TreePoint { x: 3.0, y: 16.5 } taken [0, 1, 2, 4, 5, 6, 9, 10] -> TreePoint { x: 4.0, y: 16.5 }
+GridBox([7, 2, 11, 4]) at TreePoint { x: 9.0, y: 3.5 } taken [0, 3, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 7.0, y: 4.0 }
+GridBox([5, 3, 9, 6]) at TreePoint { x: 7.0, y: 3.75 } taken [2, 3, 5, 6, 7, 8, 11] -> TreePoint { x: 7.0, y: 6.0 }
+GridBox([1, 12, 3, 14]) at TreePoint { x: 2.5, y: 13.5 } taken [1, 2, 4, 5, 6, 7, 8, 11] -> TreePoint { x: 3.0, y: 13.5 }
+GridBox([14, 0, 17, 3]) at TreePoint { x: 14.75, y: 0.75 } taken [0, 1, 3, 4, 5, 7, 10] -> TreePoint { x: 14.75, y: -1.0 }
+GridBox([8, 2, 9, 5]) at TreePoint { x: 8.5, y: 2.75 } taken [0, 1, 2, 3, 4, 5, 6, 7, 9, 10] -> TreePoint { x: 6.5, y: 1.0 }
+GridBox([5, 6, 6, 10]) at TreePoint { x: 5.25, y: 7.0 } taken [1, 2, 3, 4, 5, 7] -> TreePoint { x: 5.25, y: 5.0 }
+GridBox([0, 13, 5, 14]) at TreePoint { x: 2.5, y: 13.5 } taken [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 5.0, y: 12.5 }
+GridBox([10, 10, 14, 15]) at TreePoint { x: 11.0, y: 12.5 } taken [0, 1, 2, 4, 5, 6, 7, 8, 10] -> TreePoint { x: 11.0, y: 15.0 }
+GridBox([5, 12, 6, 13]) at TreePoint { x: 5.5, y: 12.5 } taken [0, 1, 3, 4, 6, 7, 8, 10] -> TreePoint { x: 5.5, y: 13.0 }
+GridBox([0, 15, 2, 17]) at TreePoint { x: 1.0, y: 15.5 } taken [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: -2.0, y: 16.5 }
+GridBox([11, 12, 13, 13]) at TreePoint { x: 12.0, y: 12.5 } taken [1, 3, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 13.0, y: 13.5 }
+GridBox([5, 15, 7, 19]) at TreePoint { x: 5.5, y: 17.0 } taken [2, 3, 4, 5, 7, 8, 10, 11] -> TreePoint { x: 5.5, y: 19.0 }
+GridBox([4, 1, 5, 6]) at TreePoint { x: 4.75, y: 3.5 } taken [1, 2, 6, 7, 9, 10] -> TreePoint { x: 5.0, y: 3.5 }
+GridBox([5, 12, 10, 14]) at TreePoint { x: 6.25, y: 13.5 } taken [0, 2, 3, 4, 5, 6, 7, 8, 9] -> TreePoint { x: 8.25, y: 14.0 }
+GridBox([3, 2, 4, 3]) at TreePoint { x: 3.5, y: 2.5 } taken [0, 1, 2, 5, 6, 7, 8, 11] -> TreePoint { x: 4.0, y: 2.5 }
+GridBox([10, 10, 12, 12]) at TreePoint { x: 10.5, y: 10.5 } taken [1, 2, 5, 7, 8, 9, 10] -> TreePoint { x: 12.0, y: 10.5 }
+GridBox([1, 3, 5, 7]) at TreePoint { x: 4.0, y: 4.0 } taken [1, 2, 3, 5, 7, 8, 9] -> TreePoint { x: 5.0, y: 5.0 }
+GridBox([7, 12, 12, 14]) at TreePoint { x: 8.25, y: 13.5 } taken [1, 2, 4, 6, 8, 9, 11] -> TreePoint { x: 10.25, y: 14.0 }
+GridBox([14, 4, 18, 6]) at TreePoint { x: 17.0, y: 5.5 } taken [1, 2, 3, 5, 6, 8, 11] -> TreePoint { x: 17.0, y: 6.0 }
+GridBox([0, 8, 3, 10]) at TreePoint { x: 0.75, y: 9.0 } taken [0, 3, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 3.0, y: 10.0 }
+GridBox([10, 7, 11, 11]) at TreePoint { x: 10.5, y: 9.0 } taken [0, 1, 2, 3, 5, 6, 9, 11] -> TreePoint { x: 11.0, y: 10.0 }
+GridBox([3, 0, 7, 2]) at TreePoint { x: 5.0, y: 0.5 } taken [1, 4, 6, 8, 9, 10] -> TreePoint { x: 7.0, y: 0.5 }
+GridBox([13, 1, 16, 3]) at TreePoint { x: 13.75, y: 2.0 } taken [0, 1, 3, 4, 5, 7, 10, 11] -> TreePoint { x: 13.75, y: 3.0 }
+GridBox([2, 15, 4, 19]) at TreePoint { x: 3.0, y: 18.0 } taken [2, 4, 5, 6, 9, 11] -> TreePoint { x: 4.0, y: 18.0 }
+GridBox([3, 13, 6, 16]) at TreePoint { x: 4.5, y: 15.25 } taken [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 1.0, y: 14.25 }
+GridBox([8, 2, 12, 7]) at TreePoint { x: 11.0, y: 5.75 } taken [0, 1, 2, 3, 4, 5, 7, 9, 10, 11] -> TreePoint { x: 11.0, y: 1.0 }
+GridBox([3, 12, 6, 17]) at TreePoint { x: 3.75, y: 14.5 } taken [0, 3, 4, 8, 11] -> TreePoint { x: 3.75, y: 17.0 }
+GridBox([2, 14, 5, 18]) at TreePoint { x: 3.5, y: 17.0 } taken [0, 1, 3, 4, 5, 6, 9, 10, 11] -> TreePoint { x: 0.0, y: 16.0 }
+GridBox([7, 8, 8, 13]) at TreePoint { x: 7.75, y: 9.25 } taken [0, 2, 3, 4, 5, 6, 8, 11] -> TreePoint { x: 5.0, y: 10.25 }
+GridBox([1, 8, 3, 12]) at TreePoint { x: 2.5, y: 11.0 } taken [2, 3, 4, 9, 10, 11] -> TreePoint { x: 3.0, y: 10.0 }
+GridBox([7, 3, 12, 8]) at TreePoint { x: 10.75, y: 6.75 } taken [0, 1, 2, 3, 5, 6, 8, 9, 10, 11] -> TreePoint { x: 12.0, y: 7.75 }
+GridBox([8, 7, 9, 12]) at TreePoint { x: 8.75, y: 8.25 } taken [0, 1, 3, 4, 5, 6, 8, 9, 10] -> TreePoint { x: 6.0, y: 7.25 }
+GridBox([15, 6, 18, 9]) at TreePoint { x: 17.25, y: 8.25 } taken [0, 3, 4, 5, 6, 7, 8, 10] -> TreePoint { x: 17.25, y: 9.0 }
+GridBox([15, 13, 19, 18]) at TreePoint { x: 17.0, y: 15.5 } taken [0, 1, 3, 4, 6, 7, 8, 10, 11] -> TreePoint { x: 17.0, y: 18.0 }
+GridBox([0, 10, 2, 12]) at TreePoint { x: 1.0, y: 10.5 } taken [2, 3, 4, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 1.0, y: 9.0 }
+GridBox([9, 10, 14, 15]) at TreePoint { x: 10.25, y: 13.75 } taken [0, 2, 3, 4, 6, 7, 9, 10] -> TreePoint { x: 8.25, y: 15.0 }
+GridBox([7, 15, 10, 16]) at TreePoint { x: 8.5, y: 15.25 } taken [0, 2, 3, 4, 6, 9, 11] -> TreePoint { x: 10.0, y: 14.25 }
+GridBox([3, 9, 4, 11]) at TreePoint { x: 3.25, y: 10.0 } taken [0, 2, 3, 4, 6, 7, 8, 10] -> TreePoint { x: 3.25, y: 11.0 }
+GridBox([10, 13, 15, 17]) at TreePoint { x: 11.25, y: 16.0 } taken [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 9.25, y: 17.0 }
+GridBox([3, 1, 4, 3]) at TreePoint { x: 3.75, y: 1.5 } taken [0, 1, 2, 3, 4, 6, 7, 9, 11] -> TreePoint { x: 4.0, y: 0.5 }
+GridBox([6, 2, 7, 6]) at TreePoint { x: 6.75, y: 3.0 } taken [0, 2, 3, 4, 5, 6, 8, 10, 11] -> TreePoint { x: 6.75, y: 6.0 }
+GridBox([0, 3, 1, 7]) at TreePoint { x: 0.25, y: 5.0 } taken [2, 3, 4, 5, 6, 7, 8, 10] -> TreePoint { x: 0.25, y: 7.0 }
+GridBox([9, 9, 10, 13]) at TreePoint { x: 9.75, y: 12.0 } taken [0, 1, 2, 5, 6, 8, 9] -> TreePoint { x: 10.0, y: 12.0 }
+GridBox([7, 13, 12, 17]) at TreePoint { x: 8.25, y: 16.0 } taken [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11] -> TreePoint { x: 10.25, y: 17.0 }
+GridBox([10, 13, 15, 18]) at TreePoint { x: 12.5, y: 16.75 } taken [1, 2, 4, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 15.0, y: 16.75 }
+GridBox([1, 14, 4, 15]) at TreePoint { x: 2.5, y: 14.75 } taken [0, 1, 2, 3, 4, 7, 8, 9, 10, 11] -> TreePoint { x: 2.5, y: 13.0 }
+GridBox([1, 3, 4, 8]) at TreePoint { x: 2.5, y: 4.25 } taken [0, 1, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 4.0, y: 4.25 }
+GridBox([13, 7, 17, 9]) at TreePoint { x: 14.0, y: 7.5 } taken [0, 1, 2, 3, 5, 8, 11] -> TreePoint { x: 14.0, y: 6.0 }
+GridBox([13, 6, 16, 9]) at TreePoint { x: 13.75, y: 7.5 } taken [0, 4, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 16.0, y: 7.5 }
+GridBox([14, 7, 18, 8]) at TreePoint { x: 17.0, y: 7.5 } taken [0, 1, 3, 4, 5, 7, 8] -> TreePoint { x: 17.0, y: 8.0 }
+GridBox([15, 5, 16, 6]) at TreePoint { x: 15.5, y: 5.5 } taken [0, 1, 2, 3, 4, 5, 6, 7, 9, 11] -> TreePoint { x: 17.5, y: 6.0 }
+GridBox([2, 2, 4, 5]) at TreePoint { x: 3.0, y: 2.75 } taken [0, 1, 2, 4, 5, 6, 8, 9, 10] -> TreePoint { x: 4.0, y: 2.75 }
+GridBox([14, 3, 19, 5]) at TreePoint { x: 17.75, y: 4.5 } taken [0, 1, 2, 3, 4, 5, 8, 11] -> TreePoint { x: 17.75, y: 5.0 }
+GridBox([3, 4, 5, 6]) at TreePoint { x: 4.5, y: 4.5 } taken [0, 1, 3, 5, 6, 8, 10, 11] -> TreePoint { x: 5.0, y: 5.5 }
+GridBox([2, 12, 4, 13]) at TreePoint { x: 2.5, y: 12.75 } taken [1, 2, 3, 4, 8, 11] -> TreePoint { x: 2.5, y: 13.0 }
+GridBox([3, 7, 5, 8]) at TreePoint { x: 4.0, y: 7.25 } taken [1, 2, 3, 4, 5, 6, 8, 9, 11] -> TreePoint { x: 6.0, y: 8.0 }
+GridBox([2, 14, 5, 15]) at TreePoint { x: 3.5, y: 14.5 } taken [1, 3, 5, 7, 9, 10] -> TreePoint { x: 3.5, y: 13.0 }
+GridBox([13, 9, 14, 13]) at TreePoint { x: 13.75, y: 12.0 } taken [1, 2, 3, 4, 5, 8, 9, 10, 11] -> TreePoint { x: 11.0, y: 12.0 }
+GridBox([7, 9, 12, 10]) at TreePoint { x: 9.5, y: 9.75 } taken [1, 2, 3, 4, 5, 6, 7, 8, 10, 11] -> TreePoint { x: 9.5, y: 10.0 }
+GridBox([12, 14, 17, 15]) at TreePoint { x: 14.5, y: 14.25 } taken [0, 1, 6, 7, 8, 9, 11] -> TreePoint { x: 17.0, y: 14.25 }
+GridBox([15, 13, 16, 14]) at TreePoint { x: 15.75, y: 13.5 } taken [1, 3, 5, 8, 9] -> TreePoint { x: 16.0, y: 14.5 }
+GridBox([8, 13, 9, 17]) at TreePoint { x: 8.5, y: 16.0 } taken [0, 1, 2, 3, 6, 7, 9, 10] -> TreePoint { x: 9.0, y: 17.0 }
+GridBox([4, 10, 5, 15]) at TreePoint { x: 4.75, y: 11.25 } taken [0, 4, 5, 7, 9, 10] -> TreePoint { x: 5.0, y: 11.25 }
+GridBox([11, 12, 15, 14]) at TreePoint { x: 13.0, y: 12.5 } taken [1, 4, 6, 8, 10, 11] -> TreePoint { x: 13.0, y: 14.0 }
+GridBox([2, 14, 7, 17]) at TreePoint { x: 4.5, y: 15.5 } taken [0, 5, 6, 8, 9, 10] -> TreePoint { x: 7.0, y: 15.5 }
+GridBox([9, 2, 14, 5]) at TreePoint { x: 10.25, y: 4.25 } taken [1, 2, 4, 5, 7, 8, 10] -> TreePoint { x: 10.25, y: 5.0 }
+GridBox([4, 13, 5, 18]) at TreePoint { x: 4.25, y: 14.25 } taken [1, 2, 4, 5, 7, 8, 9] -> TreePoint { x: 5.0, y: 14.25 }
+GridBox([14, 7, 15, 11]) at TreePoint { x: 14.5, y: 9.0 } taken [0, 2, 3, 4, 6, 7, 9, 10, 11] -> TreePoint { x: 15.0, y: 8.0 }
+GridBox([11, 15, 14, 17]) at TreePoint { x: 11.75, y: 15.5 } taken [0, 1, 2, 3, 4, 6, 7, 8, 9, 11] -> TreePoint { x: 14.0, y: 14.5 }
+GridBox([2, 11, 4, 14]) at TreePoint { x: 3.5, y: 13.25 } taken [0, 2, 4, 5, 6, 7, 9, 11] -> TreePoint { x: 4.0, y: 13.25 }
+GridBox([3, 2, 6, 5]) at TreePoint { x: 5.25, y: 2.75 } taken [1, 2, 3, 4, 8, 10] -> TreePoint { x: 6.0, y: 1.75 }
+GridBox([7, 2, 10, 6]) at TreePoint { x: 7.75, y: 5.0 } taken [1, 2, 3, 4, 5, 6, 7, 10, 11] -> TreePoint { x: 7.75, y: 6.0 }
+GridBox([10, 5, 13, 9]) at TreePoint { x: 12.25, y: 7.0 } taken [0, 1, 2, 3, 4, 5, 6, 8, 9, 10] -> TreePoint { x: 10.25, y: 9.0 }
+GridBox([15, 12, 16, 15]) at TreePoint { x: 15.25, y: 13.5 } taken [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 15.25, y: 11.0 }
+GridBox([9, 11, 10, 13]) at TreePoint { x: 9.25, y: 11.5 } taken [0, 1, 5, 7, 8, 10] -> TreePoint { x: 10.0, y: 11.5 }
+GridBox([2, 9, 7, 12]) at TreePoint { x: 4.5, y: 11.25 } taken [0, 3, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 7.0, y: 12.25 }
+GridBox([10, 13, 14, 17]) at TreePoint { x: 13.0, y: 14.0 } taken [4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 14.0, y: 14.0 }
+GridBox([4, 0, 7, 3]) at TreePoint { x: 5.5, y: 1.5 } taken [0, 1, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 7.0, y: 1.5 }
+GridBox([5, 5, 10, 8]) at TreePoint { x: 6.25, y: 7.25 } taken [1, 2, 4, 5, 6, 8, 10] -> TreePoint { x: 6.25, y: 8.0 }
+GridBox([3, 15, 8, 20]) at TreePoint { x: 5.5, y: 18.75 } taken [0, 1, 2, 3, 4, 5, 7, 10, 11] -> TreePoint { x: 5.5, y: 20.0 }
+GridBox([9, 9, 11, 13]) at TreePoint { x: 9.5, y: 12.0 } taken [0, 3, 7] -> TreePoint { x: 9.5, y: 13.0 }
+GridBox([5, 11, 8, 12]) at TreePoint { x: 7.25, y: 11.75 } taken [2, 3, 4, 5, 9, 11] -> TreePoint { x: 7.25, y: 10.0 }
+GridBox([8, 14, 11, 17]) at TreePoint { x: 10.25, y: 14.75 } taken [1, 2, 3, 4, 5, 6, 7, 8, 9] -> TreePoint { x: 6.0, y: 14.75 }
+GridBox([13, 1, 17, 2]) at TreePoint { x: 14.0, y: 1.5 } taken [0, 1, 3, 5, 6, 7, 9, 10] -> TreePoint { x: 12.0, y: 2.0 }
+GridBox([6, 4, 11, 8]) at TreePoint { x: 8.5, y: 7.0 } taken [0, 1, 2, 3, 4, 6, 7, 8, 9, 10] -> TreePoint { x: 6.5, y: 8.0 }
+GridBox([15, 12, 19, 13]) at TreePoint { x: 17.0, y: 12.75 } taken [0, 1, 2, 3, 4, 5, 7, 9] -> TreePoint { x: 17.0, y: 11.0 }
+GridBox([13, 15, 14, 16]) at TreePoint { x: 13.25, y: 15.25 } taken [0, 2, 3, 4, 5, 7, 8, 9, 11] -> TreePoint { x: 13.25, y: 14.0 }
+GridBox([5, 10, 10, 13]) at TreePoint { x: 7.5, y: 12.25 } taken [2, 3, 6, 7, 9, 10] -> TreePoint { x: 5.5, y: 13.0 }
+GridBox([9, 12, 14, 16]) at TreePoint { x: 10.25, y: 13.0 } taken [0, 2, 3, 5, 7, 8, 9, 10] -> TreePoint { x: 10.25, y: 11.0 }
+GridBox([9, 9, 13, 14]) at TreePoint { x: 12.0, y: 11.5 } taken [0, 1, 4, 5, 6, 7, 9, 10, 11] -> TreePoint { x: 13.0, y: 11.5 }
+GridBox([15, 10, 18, 13]) at TreePoint { x: 17.25, y: 11.5 } taken [3, 5, 9, 10, 11] -> TreePoint { x: 18.0, y: 12.5 }
+GridBox([3, 5, 5, 10]) at TreePoint { x: 4.5, y: 7.5 } taken [1, 2, 7, 8, 11] -> TreePoint { x: 5.0, y: 7.5 }
+GridBox([11, 5, 14, 7]) at TreePoint { x: 12.5, y: 6.5 } taken [0, 1, 4, 6, 7, 9, 10, 11] -> TreePoint { x: 14.0, y: 6.5 }
+GridBox([7, 9, 8, 11]) at TreePoint { x: 7.75, y: 10.0 } taken [0, 3, 4, 5, 6, 9, 11] -> TreePoint { x: 9.75, y: 11.0 }
+GridBox([15, 4, 16, 9]) at TreePoint { x: 15.25, y: 6.5 } taken [2, 3, 4, 5, 6, 9, 10, 11] -> TreePoint { x: 13.0, y: 6.5 }
+GridBox([3, 11, 5, 12]) at TreePoint { x: 4.0, y: 11.25 } taken [0, 1, 2, 3, 4, 6, 7, 10] -> TreePoint { x: 4.0, y: 12.0 }
+GridBox([3, 8, 5, 9]) at TreePoint { x: 4.5, y: 8.25 } taken [0, 2, 3, 4, 5, 8, 9, 10, 11] -> TreePoint { x: 4.5, y: 7.0 }
+GridBox([1, 14, 4, 19]) at TreePoint { x: 3.25, y: 16.5 } taken [1, 2, 4, 5, 8, 9, 10, 11] -> TreePoint { x: 4.0, y: 16.5 }
+GridBox([4, 7, 6, 8]) at TreePoint { x: 4.5, y: 7.75 } taken [0, 1, 5, 6, 7, 8, 9, 10] -> TreePoint { x: 6.0, y: 7.75 }
+GridBox([4, 3, 7, 5]) at TreePoint { x: 5.5, y: 4.0 } taken [1, 2, 3, 5, 7, 9, 10] -> TreePoint { x: 5.5, y: 2.0 }
+GridBox([13, 12, 17, 14]) at TreePoint { x: 16.0, y: 12.5 } taken [1, 2, 3, 4, 5, 6, 7, 8, 10, 11] -> TreePoint { x: 16.0, y: 14.0 }
+GridBox([3, 2, 7, 5]) at TreePoint { x: 6.0, y: 4.25 } taken [0, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 1.0, y: 5.25 }
+GridBox([0, 15, 1, 18]) at TreePoint { x: 0.5, y: 15.75 } taken [1, 4, 7, 8, 9, 10] -> TreePoint { x: 1.0, y: 15.75 }
+GridBox([9, 3, 14, 5]) at TreePoint { x: 11.5, y: 4.0 } taken [0, 2, 3, 4, 5, 6, 7, 10, 11] -> TreePoint { x: 11.5, y: 5.0 }
+GridBox([15, 13, 17, 18]) at TreePoint { x: 16.0, y: 14.25 } taken [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 13.0, y: 15.25 }
+GridBox([5, 2, 6, 7]) at TreePoint { x: 5.5, y: 4.5 } taken [1, 2, 3, 5, 8, 10] -> TreePoint { x: 6.0, y: 5.5 }
+GridBox([7, 15, 12, 20]) at TreePoint { x: 8.25, y: 18.75 } taken [1, 5, 7, 8, 11] -> TreePoint { x: 8.25, y: 20.0 }
+GridBox([1, 15, 3, 18]) at TreePoint { x: 1.5, y: 15.75 } taken [1, 3, 4, 6, 10, 11] -> TreePoint { x: 1.5, y: 18.0 }
+GridBox([13, 6, 17, 7]) at TreePoint { x: 14.0, y: 6.75 } taken [0, 2, 3, 6, 8, 9, 11] -> TreePoint { x: 16.0, y: 7.0 }
+GridBox([6, 10, 9, 12]) at TreePoint { x: 6.75, y: 11.0 } taken [0, 2, 3, 5, 6, 8, 9, 11] -> TreePoint { x: 8.75, y: 12.0 }
+GridBox([12, 10, 17, 12]) at TreePoint { x: 14.5, y: 11.5 } taken [0, 1, 2, 3, 4, 7, 10] -> TreePoint { x: 14.5, y: 12.0 }
+GridBox([1, 3, 3, 5]) at TreePoint { x: 1.5, y: 3.5 } taken [0, 2, 3, 7, 8, 9, 10, 11] -> TreePoint { x: 1.5, y: 2.0 }
+GridBox([13, 14, 16, 16]) at TreePoint { x: 14.5, y: 14.5 } taken [0, 1, 2, 3, 7, 8, 9, 11] -> TreePoint { x: 14.5, y: 13.0 }
+GridBox([9, 10, 13, 11]) at TreePoint { x: 11.0, y: 10.25 } taken [1, 2, 4, 6, 7, 8, 10, 11] -> TreePoint { x: 11.0, y: 11.0 }
+GridBox([5, 11, 10, 16]) at TreePoint { x: 7.5, y: 14.75 } taken [0, 2, 3, 4, 6, 7, 10, 11] -> TreePoint { x: 7.5, y: 16.0 }
+GridBox([14, 5, 19, 8]) at TreePoint { x: 16.5, y: 7.25 } taken [2, 3, 4, 5, 6, 7, 8, 9, 10, 11] -> TreePoint { x: 12.0, y: 7.25 }
+GridBox([7, 10, 9, 13]) at TreePoint { x: 8.5, y: 12.25 } taken [1, 3, 4, 5, 6, 7, 9] -> TreePoint { x: 10.5, y: 13.0 }
+GridBox([1, 9, 2, 10]) at TreePoint { x: 1.25, y: 9.25 } taken [0, 1, 3, 4, 5] -> TreePoint { x: 1.25, y: 10.0 }
+GridBox([1, 11, 3, 12]) at TreePoint { x: 2.5, y: 11.5 } taken [1, 2, 3, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 3.0, y: 12.5 }
+GridBox([11, 7, 12, 12]) at TreePoint { x: 11.25, y: 9.5 } taken [0, 3, 4, 6, 9, 10] -> TreePoint { x: 12.0, y: 8.5 }
+GridBox([15, 5, 17, 7]) at TreePoint { x: 16.0, y: 5.5 } taken [0, 2, 3, 4, 5, 6, 8, 10, 11] -> TreePoint { x: 16.0, y: 7.0 }
+GridBox([11, 1, 13, 6]) at TreePoint { x: 12.5, y: 4.75 } taken [0, 1, 2, 3, 5, 6, 7, 9, 10] -> TreePoint { x: 13.0, y: 5.75 }
+GridBox([12, 14, 13, 16]) at TreePoint { x: 12.5, y: 14.5 } taken [1, 3, 5, 7, 8, 9, 10, 11] -> TreePoint { x: 13.0, y: 15.5 }
+GridBox([13, 8, 15, 10]) at TreePoint { x: 13.5, y: 9.0 } taken [1, 2, 3, 4, 7, 8, 9] -> TreePoint { x: 13.5, y: 7.0 }
+GridBox([5, 12, 8, 16]) at TreePoint { x: 5.75, y: 14.0 } taken [0, 1, 2, 4, 6, 8, 9, 10, 11] -> TreePoint { x: 8.0, y: 14.0 }
+GridBox([5, 15, 9, 16]) at TreePoint { x: 8.0, y: 15.5 } taken [0, 2, 5, 6, 8, 9, 10] -> TreePoint { x: 9.0, y: 15.5 }
+GridBox([4, 1, 8, 5]) at TreePoint { x: 5.0, y: 4.0 } taken [0, 1, 2, 3, 8, 9, 10, 11] -> TreePoint { x: 8.0, y: 5.0 }
+GridBox([9, 0, 14, 3]) at TreePoint { x: 10.25, y: 2.25 } taken [0, 2, 3, 6, 7, 8] -> TreePoint { x: 10.25, y: 3.0 }
+GridBox([4, 3, 5, 8]) at TreePoint { x: 4.75, y: 4.25 } taken [0, 2, 5, 6, 7, 8] -> TreePoint { x: 5.0, y: 4.25 }
+GridBox([14, 0, 17, 2]) at TreePoint { x: 15.5, y: 0.5 } taken [1, 2, 3, 5, 6, 8, 9, 10] -> TreePoint { x: 17.0, y: 1.5 }
+GridBox([4, 5, 8, 8]) at TreePoint { x: 6.0, y: 5.75 } taken [0, 1, 2, 3, 4, 5, 6, 8] -> TreePoint { x: 6.0, y: 8.0 }
+GridBox([5, 12, 10, 13]) at TreePoint { x: 7.5, y: 12.75 } taken [1, 2, 6, 7, 8, 10, 11] -> TreePoint { x: 7.5, y: 13.0 }

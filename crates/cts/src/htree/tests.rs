@@ -861,3 +861,263 @@ fn values_exactly_the_tolerance_apart_are_not_fuzzily_equal() {
     assert!(!fuzzy_eq(1e-6, 0.0, 1e-6));
     assert!(fuzzy_eq(0.5e-6, 0.0, 1e-6));
 }
+
+#[test]
+fn the_distance_between_sinks_counts_the_wire_each_stands_for() {
+    let mut tree = builder();
+    let (a, b) = (TreePoint::new(0.0, 0.0), TreePoint::new(3.0, 4.0));
+    let _ = tree
+        .insertion_lengths
+        .insert(a.key(), SegmentLength::new(10.0));
+    let _ = tree
+        .insertion_lengths
+        .insert(b.key(), SegmentLength::new(100.0));
+
+    assert!((tree.compute_dist(a, b) - 117.0).abs() < 1e-12);
+}
+
+/// A number below `n` as a small count.
+fn small(rng: &mut SeededRng, n: u64) -> u8 {
+    u8::try_from(rng.below(n)).unwrap()
+}
+
+/// What legalizing a buffer two units wide and one high gives at a seeded
+/// point inside a blockage, the spots beside the blockage it would move to
+/// taken at random, so that every one of them is tried.
+fn legalized_beside_taken_spots_text() -> String {
+    let mut rng = SeededRng::new(59);
+    let mut lines = Vec::new();
+    for _ in 0..300 {
+        let blockage = GridBox::random(&mut rng);
+        let [x1, y1, x2, y2] = blockage.0.map(|v| v as f64);
+        let inside = |rng: &mut SeededRng, lo: f64, hi: f64| {
+            lo + (hi - lo) * f64::from(1 + small(rng, 3)) / 4.0
+        };
+        let p = TreePoint::new(inside(&mut rng, x1, x2), inside(&mut rng, y1, y2));
+        let (w, h) = (2.0, 1.0);
+        let beside = [
+            (x1 - w, p.y),
+            (x1 - w, p.y + h),
+            (x1 - w, p.y - h),
+            (x2, p.y),
+            (x2, p.y + h),
+            (x2, p.y - h),
+            (p.x, y1 - h),
+            (p.x + w, y1 - h),
+            (p.x - w, y1 - h),
+            (p.x, y2),
+            (p.x + w, y2),
+            (p.x - w, y2),
+        ];
+        let scene = Scene::new(vec![blockage.rect()]).with_buffer_size(2, 1);
+        let mut tree = builder();
+        let mut taken = Vec::new();
+        for (k, &(x, y)) in beside.iter().enumerate() {
+            if rng.below(3) > 0 {
+                tree.commit(TreePoint::new(x, y));
+                taken.push(k);
+            }
+        }
+
+        let moved = tree.legalize_in_blockages(&scene.ctx(), p, buffer());
+
+        lines.push(format!(
+            "{blockage:?} at {p:?} taken {taken:?} -> {moved:?}"
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn a_buffer_in_a_blockage_moves_beside_it_as_it_always_has() {
+    assert_golden(
+        &golden_dir(),
+        "htree_legalized_beside_taken.txt",
+        &legalized_beside_taken_spots_text(),
+    );
+}
+
+/// A seeded segment: one to three units long, a few steps of load, slews
+/// and input load, a delay, and a buffer or none.
+fn random_segment(rng: &mut SeededRng) -> WireSegment {
+    let locations = if rng.below(2) == 0 {
+        Vec::new()
+    } else {
+        vec![rng.pick(&[0.5, 1.0])]
+    };
+    WireSegment {
+        length: 1 + small(rng, 3),
+        load: 1 + small(rng, 3),
+        output_slew: 1 + small(rng, 5),
+        delay: u32::from(small(rng, 40)),
+        input_cap: 1 + small(rng, 3),
+        input_slew: 1 + small(rng, 5),
+        buffer_masters: locations.iter().map(|_| buffer()).collect(),
+        buffer_locations: locations,
+        wl_to_first_buffer: i32::from(small(rng, 4)),
+        last_wl: i32::from(small(rng, 3)),
+    }
+}
+
+/// What the fastest segment searches give over seeded tables and queries,
+/// with where each leaves the next search.
+fn segment_choices_text() -> String {
+    let mut rng = SeededRng::new(61);
+    let mut lines = Vec::new();
+    for _ in 0..30 {
+        let segments: Vec<WireSegment> = (0..12).map(|_| random_segment(&mut rng)).collect();
+        for (i, s) in segments.iter().enumerate() {
+            lines.push(format!(
+                "{i}: length {} load {} slew {} delay {} input cap {} slew {} buffers {:?} first {} last {}",
+                s.length, s.load, s.output_slew, s.delay, s.input_cap, s.input_slew,
+                s.buffer_locations, s.wl_to_first_buffer, s.last_wl
+            ));
+        }
+        let tech = TechChar::from_segments(segments, 1);
+        for _ in 0..10 {
+            let query = SegmentQuery {
+                length: LengthSteps::new(i64::from(1 + small(&mut rng, 3))),
+                input_slew: SlewSteps::new(rng.pick(&[1, 3, 6, 13, 17])),
+                input_cap: CapSteps::new(rng.pick(&[1, 2, 4, 13, 17])),
+                slew_threshold: SlewSteps::new(rng.pick(&[2, 4, MAX_SLEW])),
+                wirelength_threshold: LengthSteps::new(i64::from(small(&mut rng, 7))),
+            };
+            let mut out = SegmentChoice {
+                curr_wl: LengthSteps::new(i64::from(small(&mut rng, 4))),
+                ..NO_CHOICE
+            };
+            let start = out;
+
+            let key = min_delay_segment(&tech, &query, 1, &mut out);
+
+            lines.push(format!(
+                "  {query:?} from {start:?}: {key:?} leaves {out:?}"
+            ));
+        }
+    }
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn segment_searches_choose_as_they_always_have() {
+    assert_golden(
+        &golden_dir(),
+        "htree_segment_choices.txt",
+        &segment_choices_text(),
+    );
+}
+
+/// A seeded segment of a branch: five to thirty units long with up to two
+/// buffers along it.
+fn random_branch_segment(rng: &mut SeededRng) -> WireSegment {
+    let shares: Vec<f64> = (0..rng.below(3))
+        .map(|_| rng.pick(&[0.25, 0.5, 1.0]))
+        .collect();
+    WireSegment {
+        length: 5 * (1 + small(rng, 6)),
+        buffer_masters: shares.iter().map(|_| buffer()).collect(),
+        buffer_locations: shares,
+        ..segment(1, 1, &[], 0)
+    }
+}
+
+/// A point on a five-unit grid of the 100-unit core.
+fn branch_point(rng: &mut SeededRng) -> TreePoint {
+    TreePoint::new(f64::from(5 * small(rng, 21)), f64::from(5 * small(rng, 21)))
+}
+
+/// A seeded branch to lay: its segments between two points, a blockage in
+/// the way now and then, and spots taken at random.
+struct BranchCase {
+    segments: Vec<WireSegment>,
+    root: TreePoint,
+    target: TreePoint,
+    scene: Scene,
+    tree: Builder,
+}
+
+impl BranchCase {
+    fn random(rng: &mut SeededRng) -> Self {
+        let segments = (0..=rng.below(4))
+            .map(|_| random_branch_segment(rng))
+            .collect();
+        let (root, target) = (branch_point(rng), branch_point(rng));
+        let blockages = if rng.below(3) == 0 {
+            let (x, y) = (i64::from(10 * small(rng, 8)), i64::from(10 * small(rng, 8)));
+            vec![rect(x, y, x + 20, y + 20)]
+        } else {
+            Vec::new()
+        };
+        let mut tree = builder();
+        for _ in 0..rng.below(5) {
+            tree.commit(branch_point(rng));
+        }
+        Self {
+            segments,
+            root,
+            target,
+            scene: Scene::new(blockages).with_buffer_size(2, 1),
+            tree,
+        }
+    }
+
+    /// The branch laid with its end forced to a buffer: the case, then its
+    /// buffers and subnets.
+    fn laid(mut self) -> Vec<String> {
+        let lengths: Vec<u8> = self.segments.iter().map(|s| s.length).collect();
+        let shares: Vec<&[f64]> = self
+            .segments
+            .iter()
+            .map(|s| s.buffer_locations.as_slice())
+            .collect();
+        let mut lines = vec![format!(
+            "{:?} to {:?} lengths {lengths:?} shares {shares:?} blockages {:?}",
+            self.root, self.target, self.scene.blockages
+        )];
+        let wires: Vec<usize> = (0..self.segments.len()).collect();
+        let tech = TechChar::from_segments(self.segments.clone(), 1);
+        let driving = self.tree.clock.add_subnet("root");
+        let mut branch = SegmentBuilder {
+            inst_prefix: "b_".into(),
+            net_prefix: "n_".into(),
+            root: self.root,
+            target: self.target,
+            driving,
+            levels: 0,
+        };
+
+        branch.build(&mut self.tree, &self.scene.ctx(), &tech, &wires);
+        branch.force_buffer(&mut self.tree, buffer());
+
+        for b in &self.tree.clock.buffers {
+            lines.push(format!(
+                "  {} at ({} {})",
+                b.name,
+                b.location.x.get(),
+                b.location.y.get()
+            ));
+        }
+        for s in &self.tree.clock.subnets {
+            lines.push(format!("  {}: {:?}", s.name, s.insts));
+        }
+        lines
+    }
+}
+
+/// Where a branch's buffers go in seeded cases, and the subnets joining them.
+fn branch_buffers_text() -> String {
+    let mut rng = SeededRng::new(67);
+    let lines: Vec<String> = (0..200)
+        .flat_map(|_| BranchCase::random(&mut rng).laid())
+        .collect();
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn branches_place_their_buffers_as_they_always_have() {
+    assert_golden(
+        &golden_dir(),
+        "htree_branch_buffers.txt",
+        &branch_buffers_text(),
+    );
+}
