@@ -1,6 +1,7 @@
 use super::*;
 use crate::fixtures;
 use pare_common::db::rules::WidthRangeSpacing;
+use pare_common::testing::{SeededRng, assert_golden};
 
 /// A tree rooted at node 0 over nodes at `xs` along the x axis.
 fn tree(xs: &[i64], parent: &[Option<usize>]) -> SteinerTree {
@@ -280,4 +281,106 @@ fn a_cells_first_output_is_found_after_its_inputs() {
     let output = first_output(&db, gate).map(|p| db.pin_name(p));
 
     assert_eq!(output.as_deref(), Some("gate/Z"));
+}
+
+/// A whole number of 20-micron steps below `n`, in database units.
+fn grid_step(rng: &mut SeededRng, n: u64) -> i64 {
+    40_000 * i64::try_from(rng.below(n)).unwrap()
+}
+
+/// DEF components and blockages of a seeded scene: blocks 20 microns a
+/// side on a grid of their own size, some left unplaced, a flop, and hard
+/// and soft placement blockages, so grown boxes often meet edge to edge.
+fn blockage_scene(rng: &mut SeededRng) -> String {
+    let mut components = Vec::new();
+    for i in 0..rng.below(5) {
+        let placement = if rng.below(6) == 0 {
+            String::new()
+        } else {
+            format!(
+                " + PLACED ( {} {} ) N",
+                grid_step(rng, 8) / 2,
+                grid_step(rng, 8) / 2
+            )
+        };
+        components.push(format!("- ram{i} RAM{placement} ;"));
+    }
+    components.push(format!(
+        "- ff DFF_X1 + PLACED ( {} 0 ) N ;",
+        grid_step(rng, 8)
+    ));
+    let mut blockages = Vec::new();
+    for _ in 0..rng.below(3) {
+        let (x, y) = (grid_step(rng, 8) / 2, grid_step(rng, 8) / 2);
+        let (w, h) = (
+            20_000 + grid_step(rng, 2) / 2,
+            20_000 + grid_step(rng, 2) / 2,
+        );
+        let soft = if rng.below(4) == 0 { " + SOFT" } else { "" };
+        blockages.push(format!(
+            "- PLACEMENT{soft} RECT ( {x} {y} ) ( {} {} ) ;",
+            x + w,
+            y + h
+        ));
+    }
+    format!(
+        "COMPONENTS {} ;\n{}\nEND COMPONENTS\nBLOCKAGES {} ;\n{}\nEND BLOCKAGES\n",
+        components.len(),
+        components.join("\n"),
+        blockages.len(),
+        blockages.join("\n")
+    )
+}
+
+/// Boxes as `(x1 y1 x2 y2)`.
+fn boxes(rects: &[Rect<Dbu>]) -> String {
+    let corners: Vec<String> = rects
+        .iter()
+        .map(|r| {
+            format!(
+                "({} {} {} {})",
+                r.min.x.get(),
+                r.min.y.get(),
+                r.max.x.get(),
+                r.max.y.get()
+            )
+        })
+        .collect();
+    corners.join(" ")
+}
+
+/// What merging the blockages of seeded scenes gives, grown by a buffer.
+fn merged_blockages_text() -> String {
+    let mut rng = SeededRng::new(47);
+    let mut lines = Vec::new();
+    for _ in 0..300 {
+        let scene = blockage_scene(&mut rng);
+        let bloat = Point::new(
+            Dbu::new(rng.pick(&[0, 5000, 10_000])),
+            Dbu::new(rng.pick(&[0, 10_000])),
+        );
+        let db = fixtures::design(&scene);
+        let (merged, diameter) = merge_blockages(&db, bloat);
+        lines.push(
+            scene
+                .lines()
+                .filter(|l| l.starts_with('-'))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        lines.push(format!(
+            "  bloat ({} {}): {} diameter {:?}",
+            bloat.x.get(),
+            bloat.y.get(),
+            boxes(&merged),
+            diameter.map(Microns::get)
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
+#[test]
+fn seeded_blocks_merge_into_the_blockages_they_always_have() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    assert_golden(&dir, "merged_blockages.txt", &merged_blockages_text());
 }
