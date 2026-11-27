@@ -803,3 +803,78 @@ fn a_list_braces_the_elements_that_need_it() {
     assert_eq!(join_list(&items(&["", "a"])), "{} a");
     assert_eq!(join_list(&items(&["a b", "a$b", "c"])), "{a b} {a$b} c");
 }
+
+#[test]
+fn braces_and_brackets_inside_quotes_and_quotes_inside_braces_are_plain_text() {
+    for script in [
+        "set v \"a{b\"\nset w 2",
+        "set v \"a[b\"\nset w 2",
+        "set v {a\"b}\nset w 2",
+        "set v [list \"a]b\"\n c]\nset w 2",
+        "set v [list {a]b}\n c]\nset w 2",
+    ] {
+        assert_eq!(split_commands(script, 1).len(), 2, "{script:?}");
+    }
+}
+
+#[test]
+fn a_script_may_end_in_a_comment_or_a_line_continuation() {
+    assert_eq!(split_commands("set a 1\n# the end", 1).len(), 1);
+    assert_eq!(split_commands("set a 1\n# the end \\", 1).len(), 1);
+    assert_eq!(
+        split_commands("set a 1 \\\n", 1),
+        [("set a 1  ".to_string(), 1)]
+    );
+}
+
+#[test]
+fn an_escape_inside_a_quoted_element_is_kept_wherever_it_falls() {
+    assert_eq!(split_list("\"ab\\\"c\" d"), ["ab\"c", "d"]);
+}
+
+#[test]
+fn a_constraint_file_is_read_from_disk() {
+    let path = std::env::temp_dir().join(format!("pare-sdc-{}.sdc", std::process::id()));
+    std::fs::write(&path, "create_clock -name a -period 2 [get_ports clk]\n").unwrap();
+
+    let sdc = parse_file(&path, &design(), &liberty());
+
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(sdc.unwrap().clocks.len(), 1);
+}
+
+#[test]
+fn all_clocks_names_every_clock() {
+    let script = format!("{TWO_CLOCKS}all_clocks");
+
+    assert_eq!(eval(&script).unwrap(), "_sta_clock:a _sta_clock:b");
+}
+
+#[test]
+fn a_transition_limit_takes_the_library_time_unit() {
+    let sdc = parse("set_max_transition 0.5 top\n");
+
+    let limit = sdc.limits.max_transition.unwrap().get();
+    assert!((limit - 0.5e-9).abs() < 1e-18, "{limit}");
+}
+
+#[test]
+fn an_input_transition_goes_on_the_edges_and_sides_its_flags_pick() {
+    let db = design();
+    let sdc = parse(
+        "set_input_transition -rise -max 0.1 [get_ports rst_n]\n\
+         set_input_transition -fall 0.2 [get_ports clk]\n",
+    );
+
+    let rst = &sdc.input_slews[&port(&db, "rst_n")];
+    assert!(rst.get(Edge::Rise, MinMax::Max).is_some());
+    assert_eq!(rst.get(Edge::Rise, MinMax::Min), None);
+    assert_eq!(rst.get(Edge::Fall, MinMax::Max), None);
+    let clk = &sdc.input_slews[&port(&db, "clk")];
+    assert!(clk.get(Edge::Fall, MinMax::Min).is_some());
+    assert_eq!(clk.get(Edge::Rise, MinMax::Min), None);
+    assert_eq!(
+        eval("set_input_transition 0.1 [get_ports clk]").unwrap(),
+        ""
+    );
+}
