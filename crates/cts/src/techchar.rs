@@ -754,16 +754,11 @@ fn buffer_height(setup: &CharSetup<'_>, buffer: BufferCell) -> Result<i64, CtsEr
     Ok(height)
 }
 
-/// The wire lengths characterized, a characterization unit apart.
+/// The wire lengths characterized, a characterization unit apart, as
+/// `initCharacterization` steps them: with no wire unit of the user's and
+/// at least two iterations, both its bounds come to the last iteration.
 fn wire_lengths(char_unit: u32) -> Vec<u32> {
-    let max_wirelength = (char_unit * WIRELENGTH_ITERATIONS).max(2 * char_unit);
-    let mut wirelengths = Vec::new();
-    let mut wirelength = char_unit;
-    while wirelength <= max_wirelength && wirelength <= WIRELENGTH_ITERATIONS * char_unit {
-        wirelengths.push(wirelength);
-        wirelength += char_unit;
-    }
-    wirelengths
+    (1..=WIRELENGTH_ITERATIONS).map(|i| i * char_unit).collect()
 }
 
 /// The slews and loads to test, from the delay tables' axes with the
