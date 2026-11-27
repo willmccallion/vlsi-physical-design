@@ -489,7 +489,7 @@ impl Builder {
         self.min_length_sink_region = tech.min_segment_length() * 2;
         self.init_sink_region(ctx, tech);
         for level in 1..=CLOCK_TREE_MAX_DEPTH {
-            let per_region = self.sinks_per_sub_region(ctx, level);
+            let per_region = self.sinks_per_sub_region(level);
             let (width, height) = self.sub_region_size(level);
             let min_length = self.min_length_sink_region.get() as f64;
             if width < min_length || height < min_length {
@@ -501,10 +501,9 @@ impl Builder {
                 break;
             }
         }
-        if self.topologies.is_empty() {
-            self.single_buffer_clock_net(ctx);
-            return;
-        }
+        // NOTE: HTreeBuilder::run drives every sink from one buffer when it
+        // stops before the first level; PARE, always making fake LUT entries,
+        // never does, so every tree has a level.
         self.legalize(ctx);
         self.create_clock_subnets(ctx, tech);
     }
@@ -536,14 +535,10 @@ impl Builder {
         }
     }
 
-    fn sinks_per_sub_region(&self, ctx: &TreeContext<'_>, level: u32) -> u32 {
-        let total = if self.clock.sinks.len() > self.min_clustering_sinks()
-            && ctx.settings.sink_clustering == SinkClusteringMode::Clustered
-        {
-            self.top_level_sinks_clustered.len()
-        } else {
-            self.clock.sinks.len()
-        };
+    fn sinks_per_sub_region(&self, level: u32) -> u32 {
+        // NOTE: computeNumberOfSinksPerSubRegion counts the clustered sinks
+        // only where clustering ran; PARE's top level then holds every sink.
+        let total = self.top_level_sinks_clustered.len();
         let roots = u32::saturating_from(2_f64.powi(i32::saturating_from(level)));
         u32::saturating_from((total as f64 / f64::from(roots)).ceil())
     }
@@ -829,7 +824,7 @@ impl Builder {
                 length += char_length;
                 keys.push(key);
             }
-            if wires >= 1 && length == segment_length {
+            if length == segment_length {
                 break;
             }
             char_length = char_length - LengthSteps::new(1);
@@ -1243,7 +1238,7 @@ impl Builder {
         let point = self.topologies[level_idx].points[idx];
         let legal = self.legalize_one_buffer(ctx, point, ctx.root_buffer);
         self.commit_move(point, legal);
-        if level_idx > 0 && self.clock.subnets[driving].level.is_none() {
+        if self.clock.subnets[driving].level.is_none() {
             self.clock.subnets[driving].level = Some(u32::saturating_from(level_idx));
         }
         let wires = self.topologies[level_idx].wire_segments.clone();
@@ -1260,27 +1255,6 @@ impl Builder {
             segment.force_buffer(self, ctx.root_buffer);
         }
         segment.driving
-    }
-
-    /// One buffer driving every sink, as
-    /// `HTreeBuilder::createSingleBufferClockNet`.
-    fn single_buffer_clock_net(&mut self, ctx: &TreeContext<'_>) {
-        let center = self.sink_region.center();
-        let legal = self.legalize_one_buffer(ctx, center, ctx.root_buffer);
-        self.sink_region.center = Some(legal);
-        self.commit_move(center, legal);
-        let unit = self.unit();
-        let location = legal.to_dbu(unit);
-        let root = self.clock.add_buffer("clkbuf_0", ctx.root_buffer, location);
-        if self.top_buffer_name.is_empty() {
-            self.top_buffer_name = self.clock.name(root).to_owned();
-        }
-        let subnet = self.clock.add_subnet("clknet_0");
-        self.clock.subnets[subnet].level = Some(0);
-        self.clock.subnets[subnet].add(root);
-        for i in 0..self.clock.sinks.len() {
-            self.clock.subnets[subnet].add(InstRef::Sink(i));
-        }
     }
 }
 
@@ -1578,7 +1552,6 @@ impl SegmentBuilder {
         tree.clock.subnets[self.driving].add(buffer);
         self.driving = tree.clock.add_subnet(&format!("{}_leaf", self.net_prefix));
         tree.clock.subnets[self.driving].add(buffer);
-        self.levels += 1;
     }
 }
 
