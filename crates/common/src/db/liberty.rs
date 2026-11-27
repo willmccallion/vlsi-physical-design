@@ -974,7 +974,6 @@ impl LibCell {
         self.delay_arc_sets_to(port)
             .flat_map(|s| s.arcs.iter())
             .map(TimingArc::drive_resistance)
-            .filter(|&r| r > Ohms::ZERO)
             .fold(Ohms::ZERO, Ohms::max)
     }
 
