@@ -23,4 +23,6 @@ exclude_re = [
     "replace \\+= with \\*= in <impl TimingDriver for TimingPlacement<'_>>::repair",
     # A floating-point tolerance: no input lands exactly on its boundary.
     "replace > with >= in Interpreter<'_>::set_units",
+    # Swapping high and low on every axis visits the same corners in another order.
+    "replace == with != in Table::interpolate",
 ]
