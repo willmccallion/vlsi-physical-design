@@ -350,8 +350,6 @@ struct BufferLoads {
     output: FxHashMap<InstRef, Farads32>,
     /// The heaviest load among each buffer's siblings.
     ideal: FxHashMap<InstRef, Farads32>,
-    /// Whether some buffer drives less than its ideal.
-    unbalanced: bool,
 }
 
 impl<'a> Cts<'a> {
@@ -1035,9 +1033,6 @@ impl Cts<'_> {
     /// dummy cell, as `TritonCTS::writeDummyLoadsToDb`.
     fn write_dummy_loads(&mut self, db: &mut NetlistDB, index: usize) -> Result<usize, CtsError> {
         let loads = self.buffer_loads(db, index);
-        if !loads.unbalanced {
-            return Ok(0);
-        }
         let candidates = self.dummy_candidates();
         let mut inserted = 0;
         let subnet_count = self.builders[index].clock.subnets.len();
@@ -1096,23 +1091,18 @@ impl Cts<'_> {
             let _ = loads.output.insert(subnet.driver(), total);
         }
         for subnet in &clock.subnets {
-            let mut max_cap = Farads32::MIN_POSITIVE;
-            for &i in subnet.sinks() {
-                if let InstRef::Buffer(_) = i {
-                    let cap = loads.output.get(&i).copied().unwrap_or_default();
-                    if cap > max_cap {
-                        max_cap = cap;
-                    }
-                }
-            }
-            for &i in subnet.sinks() {
-                if let InstRef::Buffer(_) = i {
-                    let _ = loads.ideal.insert(i, max_cap);
-                    if !sta_fuzzy_equal(loads.output.get(&i).copied().unwrap_or_default(), max_cap)
-                    {
-                        loads.unbalanced = true;
-                    }
-                }
+            let buffers = || {
+                subnet
+                    .sinks()
+                    .iter()
+                    .copied()
+                    .filter(|i| matches!(i, InstRef::Buffer(_)))
+            };
+            let max_cap = buffers()
+                .map(|i| loads.output.get(&i).copied().unwrap_or_default())
+                .fold(Farads32::MIN_POSITIVE, Farads32::max);
+            for i in buffers() {
+                let _ = loads.ideal.insert(i, max_cap);
             }
         }
         loads
