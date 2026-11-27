@@ -213,6 +213,7 @@ fn main() -> anyhow::Result<()> {
     report.passed = outcome.is_ok();
     report.wall = start_time.elapsed();
     report.peak_rss_mb = pare_common::memory::peak_rss_mb();
+    report.threads = rayon::current_num_threads();
     let written = args
         .report
         .as_deref()

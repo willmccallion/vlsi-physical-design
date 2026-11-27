@@ -42,6 +42,8 @@ pub(crate) struct Report {
     pub(crate) wall: Duration,
     /// Peak resident memory of the process in megabytes, where known.
     pub(crate) peak_rss_mb: Option<u64>,
+    /// Worker threads every parallel step of the run had.
+    pub(crate) threads: usize,
 }
 
 /// The wall time of one phase.
