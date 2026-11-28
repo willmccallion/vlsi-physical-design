@@ -1,9 +1,19 @@
 use super::*;
+use crate::bnet::PinLoad;
+use crate::resizer::GlobalRouting;
+use crate::route_parasitics::RouteRc;
 use crate::testing::{
-    cells, cells_with, clock_cells_source, design, design_with_copies, with_timed_session,
+    DefSections, cells, cells_with, clock_cells_source, def_text, design, design_with_copies, pin,
+    with_timed_session, with_wired_session,
 };
+use crate::testing::{metal2_wires, with_session_inputs};
+use pare_common::db::design::NetlistDB;
+use pare_common::db::global_route::{NetRoute, RouteSource};
+use pare_common::db::indices::{CutLayerId, LayerId};
+use pare_common::db::liberty::Liberty;
 use pare_common::db::parser::liberty::parse_str;
-use std::path::Path;
+use std::fmt::Write;
+use std::path::Path as FilePath;
 
 /// An AND gate whose inputs reach `ZN` with the given rise and fall
 /// delays, in nanoseconds.
@@ -25,7 +35,7 @@ fn and2(a1: (f64, f64), a2: (f64, f64)) -> LibCell {
         timing("A1", a1),
         timing("A2", a2)
     );
-    let lib = parse_str(&src, Path::new("t.lib")).unwrap();
+    let lib = parse_str(&src, FilePath::new("t.lib")).unwrap();
     lib.cells[LibCellId(0)].clone()
 }
 
@@ -64,6 +74,13 @@ fn sized_buffer(name: &str, max_cap_ff: f64, slew: f64) -> String {
 /// 30 fF and `C` up to 10 fF, `A` the weakest.
 fn half_driver_under(constraints: &str) -> String {
     let sizes = [("A", 30.6, 0.9), ("B", 30.0, 0.5), ("C", 10.0, 0.45)];
+    half_driver_among(&sizes, constraints)
+}
+
+/// The size `half_driving_power_cell` picks for a `BUF_X1` under
+/// `constraints`, among buffers of the given names, load limits in
+/// femtofarads and slews in nanoseconds at 100 fF.
+fn half_driver_among(sizes: &[(&str, f64, f64)], constraints: &str) -> String {
     let copies: Vec<(&str, &str)> = sizes.iter().map(|&(n, _, _)| ("BUF_X1", n)).collect();
     let mut db = design_with_copies(
         "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN sizes ;\n\
@@ -105,7 +122,7 @@ fn an_isolation_cell_has_no_equivalent_inputs() {
                  pin (A1) { direction : input; capacitance : 1.0; }
                  pin (A2) { direction : input; capacitance : 1.0; }
                  pin (ZN) { direction : output; function : \"(A1 & A2)\"; } } }";
-    let isolation = parse_str(src, Path::new("t.lib")).unwrap().cells[LibCellId(0)].clone();
+    let isolation = parse_str(src, FilePath::new("t.lib")).unwrap().cells[LibCellId(0)].clone();
 
     assert_eq!(
         equivalent_pins(&gate, LibPortId::new(0)),
@@ -218,4 +235,923 @@ fn the_critical_input_is_judged_by_its_slowest_arc() {
     let cell = and2((0.02, 0.06), (0.05, 0.05));
 
     assert_eq!(candidate(&cell), Some(LibPortId::new(1)));
+}
+
+/// A combinational cell with inputs `inputs` and one output `ZN` of
+/// `function`, in that port order.
+fn logic_cell(inputs: &[&str], function: &str) -> LibCell {
+    multi_output_cell(inputs, &[("ZN", function)])
+}
+
+/// A combinational cell with inputs `inputs`, then the outputs `outputs`
+/// of the given names and functions, in that port order.
+fn multi_output_cell(inputs: &[&str], outputs: &[(&str, &str)]) -> LibCell {
+    let mut input_pins = String::new();
+    for name in inputs {
+        writeln!(
+            input_pins,
+            "pin ({name}) {{ direction : input; capacitance : 1.0; }}"
+        )
+        .unwrap();
+    }
+    let mut output_pins = String::new();
+    for (name, function) in outputs {
+        writeln!(
+            output_pins,
+            "pin ({name}) {{ direction : output; function : \"{function}\"; }}"
+        )
+        .unwrap();
+    }
+    let src = format!(
+        "library (t) {{ time_unit : \"1ns\"; capacitive_load_unit (1,ff);
+           cell (GATE) {{ {input_pins} {output_pins} }} }}"
+    );
+    parse_str(&src, FilePath::new("t.lib")).unwrap().cells[LibCellId(0)].clone()
+}
+
+fn ports(indices: &[usize]) -> Vec<LibPortId> {
+    indices.iter().map(|&i| LibPortId::new(i)).collect()
+}
+
+#[test]
+fn every_input_of_an_and_gate_is_equivalent_to_the_others() {
+    let gate = logic_cell(&["A", "B", "C"], "(A & B & C)");
+
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(0)), ports(&[1, 2]));
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(2)), ports(&[0, 1]));
+}
+
+#[test]
+fn inputs_are_equivalent_only_where_swapping_them_never_changes_the_output() {
+    let gate = logic_cell(&["A", "B", "C"], "(A & B & !C)");
+
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(0)), ports(&[1]));
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(1)), ports(&[0]));
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(2)), []);
+}
+
+#[test]
+fn an_input_that_only_one_term_reads_has_no_equivalent() {
+    let gate = logic_cell(&["A", "B"], "(A & !B)");
+    let mixed = logic_cell(&["A", "B", "C"], "((A & B) | C)");
+
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(0)), []);
+    assert_eq!(equivalent_pins(&mixed, LibPortId::new(0)), ports(&[1]));
+    assert_eq!(equivalent_pins(&mixed, LibPortId::new(2)), []);
+}
+
+#[test]
+fn inputs_must_be_equivalent_for_every_output_of_the_gate() {
+    let gate = multi_output_cell(
+        &["A", "B", "C"],
+        &[("Z1", "(A & B & C)"), ("Z2", "(A & !B)")],
+    );
+    let reversed = multi_output_cell(
+        &["A", "B", "C"],
+        &[("Z1", "(A & !B)"), ("Z2", "(A & B & C)")],
+    );
+
+    assert_eq!(equivalent_pins(&gate, LibPortId::new(0)), []);
+    assert_eq!(equivalent_pins(&reversed, LibPortId::new(0)), []);
+}
+
+#[test]
+fn a_gate_of_one_input_or_none_to_speak_of_has_no_equivalent_pins() {
+    let inverter = logic_cell(&["A"], "!A");
+    let sink = multi_output_cell(&["A", "B"], &[]);
+
+    assert_eq!(equivalent_pins(&inverter, LibPortId::new(0)), []);
+    assert_eq!(equivalent_pins(&sink, LibPortId::new(0)), []);
+}
+
+/// An AND of `count` inputs `I0`, `I1`, ...
+fn wide_and(count: usize) -> LibCell {
+    let names: Vec<String> = (0..count).map(|i| format!("I{i}")).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    logic_cell(&refs, &format!("({})", names.join(" & ")))
+}
+
+#[test]
+fn pin_equivalence_is_simulated_for_up_to_sixteen_inputs() {
+    assert_eq!(
+        equivalent_pins(&wide_and(16), LibPortId::new(0)),
+        ports(&(1..16).collect::<Vec<_>>())
+    );
+    assert_eq!(equivalent_pins(&wide_and(17), LibPortId::new(0)), []);
+}
+
+#[test]
+fn an_input_that_is_as_fast_as_the_critical_one_is_not_a_swap() {
+    let cell = and2((0.05, 0.05), (0.05, 0.05));
+
+    assert_eq!(candidate(&cell), None);
+}
+
+#[test]
+fn moves_are_counted_as_pending_until_committed_and_as_made_throughout() {
+    let mut log = MoveLog::default();
+    let cell = CellId::new(3);
+    assert!(!log.has_pending(MoveKind::SizeUp, cell));
+
+    log.count(MoveKind::SizeUp, cell, 3);
+
+    assert!(log.has_pending(MoveKind::SizeUp, cell));
+    assert!(!log.has_pending(MoveKind::SizeUp, CellId::new(4)));
+    assert_eq!(
+        (log.made(MoveKind::SizeUp), log.committed(MoveKind::SizeUp)),
+        (3, 0)
+    );
+
+    log.commit();
+    log.count(MoveKind::SizeUp, cell, 2);
+
+    assert_eq!(
+        (log.made(MoveKind::SizeUp), log.committed(MoveKind::SizeUp)),
+        (5, 3)
+    );
+    log.undo();
+    assert!(!log.has_pending(MoveKind::SizeUp, cell));
+    assert!(log.has_moves(MoveKind::SizeUp, cell));
+    assert_eq!(log.made(MoveKind::SizeUp), 3);
+    assert_eq!(log.made(MoveKind::Clone), 0);
+}
+
+#[test]
+fn the_intrinsic_delay_of_a_port_is_its_largest_arc_at_no_slew_and_no_load() {
+    let cell = and2((0.05, 0.05), (0.03, 0.08));
+
+    let intrinsic = intrinsic_delay(&cell, LibPortId::new(2));
+
+    assert!(
+        (intrinsic - Seconds::new(0.08e-9)).abs() < Seconds::new(1e-15),
+        "{intrinsic:?}"
+    );
+}
+
+#[test]
+fn the_half_driving_size_is_the_one_nearest_half_the_load_limit_when_none_matches() {
+    // Half of BUF_X1's 60 fF is 30: 40 fF is 10 away, 25 fF 5 and 10 fF 20.
+    let sizes = [("A", 40.0, 0.9), ("B", 25.0, 0.5), ("C", 10.0, 0.45)];
+
+    assert_eq!(half_driver_among(&sizes, ""), "B");
+}
+
+#[test]
+fn of_two_sizes_equally_far_from_half_the_limit_the_first_is_taken() {
+    let sizes = [("A", 40.0, 0.9), ("C", 20.0, 0.45)];
+
+    assert_eq!(half_driver_among(&sizes, ""), "A");
+}
+
+/// A flop launching into buffer `g1`, which drives flops `f2` and `f3`
+/// directly and, through buffer `h1`, flop `f4`, all along a row.
+fn fork() -> NetlistDB {
+    let components = "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+        - g1 BUF_X1 + PLACED ( 40000 2800 ) N ;\n\
+        - f2 DFF_X1 + PLACED ( 90000 2800 ) N ;\n\
+        - f3 DFF_X1 + PLACED ( 120000 14000 ) N ;\n\
+        - h1 BUF_X1 + PLACED ( 70000 30000 ) N ;\n\
+        - f4 DFF_X1 + PLACED ( 150000 30000 ) N ;\n";
+    let nets = "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ( f3 CK ) ( f4 CK ) ;\n\
+        - n0 ( f1 Q ) ( g1 A ) ;\n\
+        - n1 ( g1 Z ) ( f2 D ) ( f3 D ) ( h1 A ) ;\n\
+        - n2 ( h1 Z ) ( f4 D ) ;\n";
+    design(&def_text(
+        "fork",
+        &DefSections {
+            components,
+            nets,
+            inputs: &["clk"],
+            outputs: &[],
+        },
+    ))
+}
+
+const SLOW_CLOCK: &str = "create_clock -name clk -period 0.3 [get_ports clk]\n";
+
+/// Runs `test` on the site of driver pin `driver` along the worst path
+/// into `end` of `db` over `lib`, with wires.
+fn on_site(
+    db: &mut NetlistDB,
+    lib: &Liberty,
+    constraints: &str,
+    (end, driver): (&str, &str),
+    test: impl FnOnce(&mut Resizer<'_, Sta>, &Path, usize),
+) {
+    let end = pin(db, end);
+    with_wired_session(db, lib, constraints, |resizer| {
+        let netlist = resizer.netlist();
+        let path = resizer
+            .sta()
+            .worst_slack_path(&netlist, end, MinMax::Max)
+            .unwrap();
+        let index = path
+            .points
+            .iter()
+            .position(|p| resizer.db.pin_name(p.pin) == driver)
+            .unwrap();
+        test(resizer, &path, index);
+    });
+}
+
+#[test]
+fn loads_are_ranked_by_the_slack_they_have_beyond_the_driver_and_then_by_name() {
+    let mut db = fork();
+
+    on_site(
+        &mut db,
+        &cells(&clock_cells_source()),
+        SLOW_CLOCK,
+        ("f4/D", "g1/Z"),
+        |resizer, path, index| {
+            let site = site(resizer, path, index).unwrap();
+            let driver_slack = resizer
+                .sta()
+                .slack(site.driver, MinMax::Max)
+                .time()
+                .unwrap();
+
+            let ranked = loads_by_spare_slack(resizer, &site, driver_slack);
+
+            let names: Vec<&str> = ranked.iter().map(|l| l.name.as_str()).collect();
+            assert_eq!(names, ["f2/D", "f3/D", "h1/A"]);
+            for load in &ranked {
+                let slack = resizer
+                    .sta()
+                    .slack_edge(load.pin, site.edge, MinMax::Max)
+                    .time()
+                    .unwrap();
+                assert!((load.spare - (slack - driver_slack)).abs() < Seconds::new(1e-15));
+            }
+            assert!(
+                ranked[0].spare > Seconds::new(1e-12),
+                "{:?}",
+                ranked[0].spare
+            );
+        },
+    );
+}
+
+#[test]
+fn a_clone_is_placed_at_the_mean_of_the_driver_and_the_loads_it_takes_over() {
+    let mut db = fork();
+
+    on_site(
+        &mut db,
+        &cells(&clock_cells_source()),
+        SLOW_CLOCK,
+        ("f4/D", "g1/Z"),
+        |resizer, path, index| {
+            let site = site(resizer, path, index).unwrap();
+            let loads = loads_by_spare_slack(resizer, &site, Seconds::ZERO);
+            let taken = &loads[..2];
+
+            let at = clone_location(resizer, site.driver, taken);
+
+            let netlist = resizer.netlist();
+            let places: Vec<Point<Dbu>> = [site.driver, taken[0].pin, taken[1].pin]
+                .iter()
+                .map(|&p| netlist.pin_location(p))
+                .collect();
+            assert_eq!(
+                at.x.get(),
+                places.iter().map(|p| p.x.get()).sum::<i64>() / 3
+            );
+            assert_eq!(
+                at.y.get(),
+                places.iter().map(|p| p.y.get()).sum::<i64>() / 3
+            );
+            assert_ne!(at, Point::new(Dbu::ZERO, Dbu::ZERO));
+        },
+    );
+}
+
+#[test]
+fn only_a_gate_with_one_output_and_no_state_is_a_single_output_combinational_one() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_timed_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let combinational = |name: &str| {
+            let cell = resizer.db.cell_id(name).unwrap();
+            let (lib, _) = resizer.link.cell(resizer.db, cell).unwrap();
+            is_single_output_combinational(resizer, cell, lib)
+        };
+
+        assert!(combinational("g1"));
+        assert!(!combinational("f1"));
+    });
+}
+
+#[test]
+fn a_gate_of_two_outputs_is_not_single_output() {
+    let mut db = fork();
+    let lib = cells_with(
+        "cell (TWO) { area : 1.0 ;
+           pin (A) { direction : input ; capacitance : 1.0 ; }
+           pin (Y) { direction : output ; function : \"A\" ; }
+           pin (Z) { direction : output ; function : \"!A\" ; } }",
+    );
+
+    with_timed_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let cell = resizer.db.cell_id("g1").unwrap();
+        let two = resizer.link.liberty.cell_id("TWO").unwrap();
+
+        assert!(!is_single_output_combinational(resizer, cell, two));
+    });
+}
+
+/// A buffer `name` like `BUF_X1`, with a slew of `slew` nanoseconds at
+/// 100 fF and `delay` nanoseconds at 100 fF and no input slew, which set
+/// its drive resistance and its delay; a slow input adds 0.01 to the delay.
+fn tuned_buffer(name: &str, slew: f64, delay: f64) -> String {
+    let slow = format!("{:.2}", delay + 0.01);
+    format!(
+        "cell ({name}) {{ area : 0.8 ;
+               pin (A) {{ direction : input ; capacitance : 0.97 ; }}
+               pin (Z) {{ direction : output ; function : \"A\" ; max_capacitance : 60.0 ;
+                 timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ;
+                   cell_rise (delay_t) {{ values (\"0.03, {delay}\", \"0.04, {slow}\") ; }}
+                   cell_fall (delay_t) {{ values (\"0.03, {delay}\", \"0.04, {slow}\") ; }}
+                   rise_transition (delay_t) {{ values (\"0.01, {slew}\", \"0.02, {slew}\") ; }}
+                   fall_transition (delay_t) {{ values (\"0.01, {slew}\", \"0.02, {slew}\") ; }} }} }} }}\n"
+    )
+}
+
+/// The size `upsize_cell` picks for a `BUF_X1` driving 10 fF from an
+/// ideal driver, among `BUF_X1`, the clock buffer and the `sizes`, each a
+/// name, a slew and a delay at 100 fF in nanoseconds.
+fn upsized_among(sizes: &[(&str, f64, f64)]) -> Option<String> {
+    let copies: Vec<(&str, &str)> = sizes.iter().map(|&(n, _, _)| ("BUF_X1", n)).collect();
+    let mut db = design_with_copies(
+        "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN sizes ;\n\
+             UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 40000 40000 ) ;\nEND DESIGN\n",
+        &copies,
+    );
+    let extra: String = sizes
+        .iter()
+        .map(|&(name, slew, delay)| tuned_buffer(name, slew, delay))
+        .collect();
+    let lib = cells_with(&extra);
+    let mut picked = None;
+    with_timed_session(&mut db, &lib, "", |resizer| {
+        let buf = resizer.link.liberty.cell_id("BUF_X1").unwrap();
+        let cell = resizer.link.liberty.cell(buf);
+        let (input, output) = (cell.port("A").unwrap(), cell.port("Z").unwrap());
+        let load = Farads::new(10e-15);
+
+        let size = upsize_cell(resizer, buf, input, output, load, Ohms::ZERO);
+
+        picked = size.map(|s| resizer.link.liberty.cell(s).name.clone());
+    });
+    picked
+}
+
+#[test]
+fn the_size_up_is_the_weakest_that_drives_harder_and_is_faster() {
+    assert_eq!(upsized_among(&[]), Some("CLKBUF_X3".to_string()));
+}
+
+#[test]
+fn a_size_of_the_same_drive_is_not_a_size_up() {
+    assert_eq!(
+        upsized_among(&[("E", 0.40, 0.10)]),
+        Some("CLKBUF_X3".to_string())
+    );
+}
+
+#[test]
+fn a_size_that_drives_harder_but_is_no_faster_is_not_a_size_up() {
+    // Same delay table as BUF_X1, so the same delay at its input load.
+    assert_eq!(
+        upsized_among(&[("G", 0.30, 0.30)]),
+        Some("CLKBUF_X3".to_string())
+    );
+    assert_eq!(
+        upsized_among(&[("H", 0.30, 0.90)]),
+        Some("CLKBUF_X3".to_string())
+    );
+}
+
+#[test]
+fn a_weaker_size_is_not_a_size_up_however_fast() {
+    assert_eq!(
+        upsized_among(&[("W", 0.60, 0.10)]),
+        Some("CLKBUF_X3".to_string())
+    );
+}
+
+/// A flop launching into buffer `g1` and flop `f5` alike; `g1` drives
+/// inverter `i1`, which drives flop `f2`.
+fn buffer_beside_a_flop() -> NetlistDB {
+    let components = "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+        - g1 BUF_X1 + PLACED ( 40000 2800 ) N ;\n\
+        - i1 INV_X1 + PLACED ( 80000 2800 ) N ;\n\
+        - f2 DFF_X1 + PLACED ( 120000 2800 ) N ;\n\
+        - f5 DFF_X1 + PLACED ( 40000 20000 ) N ;\n";
+    let nets = "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ( f5 CK ) ;\n\
+        - n0 ( f1 Q ) ( g1 A ) ( f5 D ) ;\n\
+        - n1 ( g1 Z ) ( i1 A ) ;\n\
+        - n2 ( i1 ZN ) ( f2 D ) ;\n";
+    design(&def_text(
+        "side",
+        &DefSections {
+            components,
+            nets,
+            inputs: &["clk"],
+            outputs: &[],
+        },
+    ))
+}
+
+/// Runs `test` on the removal of buffer `g1` of [`buffer_beside_a_flop`]
+/// under a clock of `period` nanoseconds, with the slack the flop `f5`
+/// beside it has.
+fn on_buffer_removal(period: f64, test: impl FnOnce(&Resizer<'_, Sta>, &Removal, Seconds)) {
+    let mut db = buffer_beside_a_flop();
+    let f5_d = pin(&db, "f5/D");
+    let clock = format!("create_clock -name clk -period {period} [get_ports clk]\n");
+    on_site(
+        &mut db,
+        &cells(&clock_cells_source()),
+        &clock,
+        ("f2/D", "g1/Z"),
+        |resizer, path, index| {
+            let at = site(resizer, path, index).unwrap();
+            let removal = Removal {
+                buffer: at,
+                input: at.input.unwrap(),
+                prev_driver: at.prev_driver.unwrap(),
+                prev_edge: at.prev_edge.unwrap(),
+            };
+            let side_slack = resizer.sta().slack(f5_d, MinMax::Max).time().unwrap();
+            test(resizer, &removal, side_slack);
+        },
+    );
+}
+
+/// A change that slows the previous driver by `degrade`, leaving its slew
+/// alone.
+fn slowing_by(degrade: Seconds) -> DriverChange {
+    let slew = EdgeValues::both(Seconds::new(0.02e-9));
+    DriverChange {
+        old_slew: slew,
+        new_slew: slew,
+        delay_degrade: degrade,
+        delay_improve: Seconds::ZERO,
+    }
+}
+
+#[test]
+fn a_side_load_with_slack_to_spare_takes_the_later_arrival() {
+    on_buffer_removal(1.0, |resizer, removal, slack| {
+        assert!(slack > Seconds::new(0.1e-9));
+
+        assert!(side_loads_ok(
+            resizer,
+            removal,
+            &slowing_by(slack * 0.5),
+            Seconds::ZERO
+        ));
+    });
+}
+
+#[test]
+fn a_side_load_that_the_later_arrival_takes_below_zero_is_refused() {
+    on_buffer_removal(1.0, |resizer, removal, slack| {
+        assert!(!side_loads_ok(
+            resizer,
+            removal,
+            &slowing_by(slack * 1.5),
+            Seconds::ZERO
+        ));
+    });
+}
+
+#[test]
+fn a_side_load_is_refused_when_the_margin_takes_it_below_zero() {
+    on_buffer_removal(1.0, |resizer, removal, slack| {
+        let no_delay = slowing_by(Seconds::ZERO);
+
+        assert!(!side_loads_ok(resizer, removal, &no_delay, slack * 1.5));
+        assert!(side_loads_ok(resizer, removal, &no_delay, slack * 0.5));
+    });
+}
+
+#[test]
+fn a_side_load_the_later_arrival_leaves_at_exactly_zero_is_kept() {
+    on_buffer_removal(1.0, |resizer, removal, slack| {
+        assert!(side_loads_ok(
+            resizer,
+            removal,
+            &slowing_by(slack),
+            Seconds::ZERO
+        ));
+    });
+}
+
+#[test]
+fn a_side_load_already_failing_may_lose_a_tenth_of_its_violation_but_no_more() {
+    on_buffer_removal(0.1, |resizer, removal, slack| {
+        assert!(slack < Seconds::new(-0.01e-9), "{slack:?}");
+
+        assert!(side_loads_ok(
+            resizer,
+            removal,
+            &slowing_by(slack.abs() * 0.05),
+            Seconds::ZERO
+        ));
+        assert!(!side_loads_ok(
+            resizer,
+            removal,
+            &slowing_by(slack.abs() * 0.5),
+            Seconds::ZERO
+        ));
+    });
+}
+
+#[test]
+fn the_loads_of_a_buffer_taken_out_must_keep_their_outputs_slack() {
+    on_buffer_removal(1.0, |resizer, removal, _| {
+        let later = slowing_by(Seconds::new(0.5e-9));
+        let earlier = DriverChange {
+            delay_improve: Seconds::new(0.5e-9),
+            ..slowing_by(Seconds::ZERO)
+        };
+
+        assert!(!buffer_loads_ok(resizer, removal, &later, Seconds::ZERO).unwrap());
+        assert!(buffer_loads_ok(resizer, removal, &earlier, Seconds::ZERO).unwrap());
+    });
+}
+
+/// Runs `test` on the inverter of [`inverted_pair`] with the slack its
+/// output has under a clock of 1 ns.
+fn with_inverter_slack(test: impl FnOnce(&Resizer<'_, Sta>, CellId, Seconds)) {
+    let mut db = inverted_pair();
+    let output = pin(&db, "i1/ZN");
+    let constraints = "create_clock -name c -period 1 [get_ports clk]\n";
+    with_timed_session(
+        &mut db,
+        &cells(&clock_cells_source()),
+        constraints,
+        |resizer| {
+            let inverter = resizer.db.cell_id("i1").unwrap();
+            let slack = resizer.sta().slack(output, MinMax::Max).time().unwrap();
+            test(resizer, inverter, slack);
+        },
+    );
+}
+
+#[test]
+fn the_margin_comes_off_the_slack_the_non_negative_rule_judges() {
+    with_inverter_slack(|resizer, inverter, slack| {
+        let impact = SlewImpact {
+            margin: slack * 0.5,
+            ..later_by(0.0, SlackRule::NonNegative)
+        };
+        let later = SlewImpact {
+            adjust: slack * 0.75,
+            ..impact
+        };
+
+        assert!(input_slew_impact_ok(resizer, inverter, &impact));
+        assert!(!input_slew_impact_ok(resizer, inverter, &later));
+    });
+}
+
+#[test]
+fn an_arrival_that_leaves_exactly_no_slack_keeps_the_non_negative_rule() {
+    with_inverter_slack(|resizer, inverter, slack| {
+        let impact = SlewImpact {
+            adjust: slack,
+            ..later_by(0.0, SlackRule::NonNegative)
+        };
+
+        assert!(input_slew_impact_ok(resizer, inverter, &impact));
+    });
+}
+
+#[test]
+fn slower_input_slews_slow_the_output_and_break_the_no_worse_rule() {
+    with_inverter_slack(|resizer, inverter, _| {
+        let sharp = EdgeValues::both(Seconds::new(0.005e-9));
+        let blunt = EdgeValues::both(Seconds::new(0.2e-9));
+        let slowing = SlewImpact {
+            old: sharp,
+            new: blunt,
+            ..later_by(0.0, SlackRule::NoWorse)
+        };
+        let speeding = SlewImpact {
+            old: blunt,
+            new: sharp,
+            ..slowing
+        };
+
+        assert!(!input_slew_impact_ok(resizer, inverter, &slowing));
+        assert!(input_slew_impact_ok(resizer, inverter, &speeding));
+    });
+}
+
+fn micron_point(x: i64, y: i64) -> Point<Dbu> {
+    Point::new(Dbu::new(2000 * x), Dbu::new(2000 * y))
+}
+
+fn load_at(at: Point<Dbu>, pin: usize, cap_ff: f64) -> BnetPtr {
+    let load = PinLoad {
+        cap: Farads::new(cap_ff * 1e-15),
+        fanout: 1.0,
+        max_slew: Seconds::INFINITY,
+    };
+    Bnet::load(at, PinId::new(pin), load)
+}
+
+fn slew_of(slews: &[(PinId, Seconds)], pin: usize) -> Seconds {
+    slews.iter().find(|(p, _)| *p == PinId::new(pin)).unwrap().1
+}
+
+#[test]
+fn a_wire_degrades_the_slew_by_its_elmore_delay_times_the_slew_factor() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let rc = resizer.tree_rc();
+        // 2 um and then 3 um of 3.5 ohm and 0.1 fF a micron.
+        let far = load_at(micron_point(5, 0), 7, 2.0);
+        let near = Bnet::wire(micron_point(2, 0), far, None, &rc);
+        let tree = Bnet::wire(micron_point(0, 0), near, None, &rc);
+
+        let slews = slews_in_tree(resizer, Seconds::new(20e-12), &tree);
+
+        // The wire to the load: 10.5 ohm, 2 fF and half of 0.3 fF; the
+        // wire before it: 7 ohm into that and half of its own 0.2 fF.
+        let load_wire: f64 = 10.5 * (2.0e-15 + 0.15e-15);
+        let outer_wire = 7.0 * (2.0e-15 + 0.3e-15 + 0.1e-15);
+        let expected = (load_wire + outer_wire).mul_add(resizer.slew_rc_factor, 20e-12);
+        assert_eq!(slews.len(), 1);
+        assert!(
+            close(slew_of(&slews, 7).get(), expected, 1e-9),
+            "{slews:?} {expected}"
+        );
+    });
+}
+
+fn close(a: f64, b: f64, tolerance: f64) -> bool {
+    (a - b).abs() <= tolerance * a.abs().max(b.abs())
+}
+
+#[test]
+fn both_branches_of_a_junction_start_from_the_slew_at_it() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let rc = resizer.tree_rc();
+        let left = Bnet::wire(
+            micron_point(1, 0),
+            load_at(micron_point(3, 0), 1, 1.0),
+            None,
+            &rc,
+        );
+        let right = load_at(micron_point(1, 4), 2, 1.0);
+        let junction = Bnet::junction(micron_point(1, 0), left, right);
+
+        let slews = slews_in_tree(resizer, Seconds::new(20e-12), &junction);
+
+        let wire = 7.0 * (1.0e-15 + 0.1e-15);
+        assert!(close(
+            slew_of(&slews, 1).get(),
+            20e-12 + wire * resizer.slew_rc_factor,
+            1e-9
+        ));
+        assert_eq!(slew_of(&slews, 2), Seconds::new(20e-12));
+    });
+}
+
+/// Global routes that have none to give.
+struct NoRoutes;
+
+impl RouteSource for NoRoutes {
+    fn update(&mut self, _: &NetlistDB, _: &[NetId]) {}
+
+    fn begin_trial(&mut self) {}
+
+    fn keep_trial(&mut self) {}
+
+    fn restore_trial(&mut self) {}
+
+    fn route(&self, _: &NetlistDB, _: NetId) -> Option<NetRoute> {
+        None
+    }
+}
+
+#[test]
+fn a_via_degrades_the_slew_by_its_resistance_into_the_capacitance_under_it() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+    let wires = metal2_wires(&db);
+    let via = Ohms::new(20.0);
+    let rc = RouteRc::new(&db.library, &[], &[(CutLayerId::new(1), via)], LayerId(0));
+
+    with_session_inputs(&mut db, &lib, SLOW_CLOCK, wires, |inputs, sdc| {
+        let mut source = NoRoutes;
+        let routes = GlobalRouting {
+            source: &mut source,
+            rc,
+            legalize: &|_, _| {},
+        };
+        let resizer = Resizer::on_global_routes(inputs, sdc, routes).unwrap();
+        let tree_rc = resizer.tree_rc();
+        let (below, above) = (LayerId::new(1), LayerId::new(2));
+        let tree = Bnet::via(
+            micron_point(0, 0),
+            below,
+            above,
+            load_at(micron_point(0, 0), 4, 3.0),
+            &tree_rc,
+        );
+        assert_eq!(tree_rc.via(below, above), via);
+
+        let slews = slews_in_tree(&resizer, Seconds::new(20e-12), &tree);
+
+        let expected = (20.0 * 3.0e-15_f64).mul_add(resizer.slew_rc_factor, 20e-12);
+        assert!(
+            close(slew_of(&slews, 4).get(), expected, 1e-9),
+            "{slews:?} {expected}"
+        );
+    });
+}
+
+fn sorted_loads(tree: &Bnet) -> Vec<usize> {
+    let mut loads: Vec<usize> = tree.loads().iter().map(|p| p.index()).collect();
+    loads.sort_unstable();
+    loads
+}
+
+#[test]
+fn stitching_replaces_the_load_the_buffer_stood_at_with_what_the_buffer_drove() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let rc = resizer.tree_rc();
+        let left = Bnet::wire(
+            micron_point(0, 0),
+            load_at(micron_point(4, 0), 10, 1.0),
+            None,
+            &rc,
+        );
+        let right = Bnet::wire(
+            micron_point(0, 0),
+            load_at(micron_point(0, 4), 30, 1.0),
+            None,
+            &rc,
+        );
+        let outer = Bnet::junction(micron_point(0, 0), left, right);
+        let inner = load_at(micron_point(4, 0), 20, 1.0);
+
+        let left_gone = stitch(resizer, &outer, PinId::new(10), &inner).unwrap();
+        let right_gone = stitch(resizer, &outer, PinId::new(30), &inner).unwrap();
+
+        assert_eq!(sorted_loads(&left_gone), [20, 30]);
+        assert_eq!(sorted_loads(&right_gone), [10, 20]);
+        assert!(stitch(resizer, &outer, PinId::new(99), &inner).is_none());
+    });
+}
+
+#[test]
+fn stitching_finds_the_load_below_a_wire_and_a_via() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let rc = resizer.tree_rc();
+        let load = load_at(micron_point(4, 0), 10, 1.0);
+        let via = Bnet::via(
+            micron_point(4, 0),
+            LayerId::new(1),
+            LayerId::new(2),
+            load,
+            &rc,
+        );
+        let outer = Bnet::wire(micron_point(0, 0), via, None, &rc);
+        let inner = load_at(micron_point(4, 0), 20, 1.0);
+
+        let stitched = stitch(resizer, &outer, PinId::new(10), &inner).unwrap();
+
+        assert_eq!(sorted_loads(&stitched), [20]);
+        assert!(matches!(stitched.kind, Kind::Wire { .. }));
+    });
+}
+
+#[test]
+fn a_load_that_is_not_the_one_asked_for_is_not_replaced() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let outer = load_at(micron_point(4, 0), 10, 1.0);
+        let inner = load_at(micron_point(4, 0), 20, 1.0);
+
+        assert!(stitch(resizer, &outer, PinId::new(11), &inner).is_none());
+        assert_eq!(
+            sorted_loads(&stitch(resizer, &outer, PinId::new(10), &inner).unwrap()),
+            [20]
+        );
+    });
+}
+
+#[test]
+fn what_the_buffer_drove_is_joined_by_a_wire_only_where_it_started_elsewhere() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let rc = resizer.tree_rc();
+        let at_the_load = load_at(micron_point(4, 0), 20, 1.0);
+        let elsewhere = Bnet::wire(
+            micron_point(4, 3),
+            load_at(micron_point(8, 3), 20, 1.0),
+            None,
+            &rc,
+        );
+        let outer = load_at(micron_point(4, 0), 10, 1.0);
+
+        let same_place = stitch(resizer, &outer, PinId::new(10), &at_the_load).unwrap();
+        let apart = stitch(resizer, &outer, PinId::new(10), &elsewhere).unwrap();
+
+        assert!(Rc::ptr_eq(&same_place, &at_the_load));
+        assert_eq!(apart.at, micron_point(4, 0));
+        assert_eq!(apart.length(), Dbu::new(2000 * 3));
+        assert!(matches!(&apart.kind, Kind::Wire { to, .. } if Rc::ptr_eq(to, &elsewhere)));
+    });
+}
+
+#[test]
+fn what_the_buffer_drove_on_a_routing_layer_is_hung_as_it_is() {
+    let mut db = fork();
+    let lib = cells(&clock_cells_source());
+
+    with_wired_session(&mut db, &lib, SLOW_CLOCK, |resizer| {
+        let rc = resizer.tree_rc();
+        let routed = Bnet::wire(
+            micron_point(4, 3),
+            load_at(micron_point(8, 3), 20, 1.0),
+            Some(LayerId::new(1)),
+            &rc,
+        );
+        let outer = load_at(micron_point(4, 0), 10, 1.0);
+
+        let stitched = stitch(resizer, &outer, PinId::new(10), &routed).unwrap();
+
+        assert!(Rc::ptr_eq(&stitched, &routed));
+    });
+}
+
+#[test]
+fn the_slews_after_a_removal_are_scaled_by_how_far_the_estimate_is_from_timing() {
+    let mut db = buffer_beside_a_flop();
+    let lib = cells(&clock_cells_source());
+    let clock = "create_clock -name clk -period 1 [get_ports clk]\n";
+    let (q, buffer_in, buffer_out) = (pin(&db, "f1/Q"), pin(&db, "g1/A"), pin(&db, "g1/Z"));
+    let (side, load) = (pin(&db, "f5/D"), pin(&db, "i1/A"));
+
+    with_wired_session(&mut db, &lib, clock, |resizer| {
+        let new_slew = Seconds::new(30e-12);
+
+        let slews = slews_after_removal(resizer, q, buffer_out, buffer_in, new_slew)
+            .unwrap()
+            .unwrap();
+
+        let tree1 = resizer.buffered_tree(q).unwrap().unwrap();
+        let tree2 = resizer.buffered_tree(buffer_out).unwrap().unwrap();
+        let stitched = stitch(resizer, &tree1, buffer_in, &tree2).unwrap();
+        let estimate = |slew: Seconds, tree: &Bnet, pin: PinId| {
+            slews_in_tree(resizer, slew, tree)
+                .iter()
+                .find(|(p, _)| *p == pin)
+                .unwrap()
+                .1
+        };
+        let up = estimate(resizer.graph.slew(q).max(), &tree1, buffer_in);
+        let up_factor = resizer.graph.slew(buffer_in).max() / up;
+        let down = estimate(resizer.graph.slew(buffer_out).max(), &tree2, load);
+        let down_factor = resizer.graph.slew(load).max() / down;
+        assert!((up_factor - 1.0).abs() > 1e-3 && (down_factor - 1.0).abs() > 1e-3);
+        assert!(up_factor.mul_add(down_factor, -1.0).abs() > 1e-3);
+
+        let found = |pin: PinId| slews.iter().find(|(p, _)| *p == pin).unwrap().1;
+        assert_eq!(slews.len(), 2);
+        assert!(close(
+            found(side).get(),
+            estimate(new_slew, &stitched, side).get(),
+            1e-12
+        ));
+        let expected = estimate(new_slew, &stitched, load) * (up_factor * down_factor);
+        assert!(
+            close(found(load).get(), expected.get(), 1e-9),
+            "{:?} {expected:?}",
+            found(load)
+        );
+    });
 }
