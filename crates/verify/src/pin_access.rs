@@ -339,8 +339,8 @@ fn parallel_run(a: &Rect<Dbu>, b: &Rect<Dbu>) -> Dbu {
     overlap(a.min.x, a.max.x, b.min.x, b.max.x).max(overlap(a.min.y, a.max.y, b.min.y, b.max.y))
 }
 
-/// Whether `a` and `b` touch or lie closer than `spacing`: along the axis
-/// they are apart in when they run side by side, corner to corner otherwise.
+/// Whether `a` and `b` touch or lie closer than `spacing` at their nearest
+/// points, corner to corner when they are apart in both axes.
 fn too_close(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
     if a.touches(b) {
         return true;
@@ -351,11 +351,7 @@ fn too_close(a: &Rect<Dbu>, b: &Rect<Dbu>, spacing: Dbu) -> bool {
     let dx = gap(a.min.x, a.max.x, b.min.x, b.max.x);
     let dy = gap(a.min.y, a.max.y, b.min.y, b.max.y);
     let s = i128::from(spacing.get());
-    if parallel_run(a, b) > Dbu::ZERO {
-        dx.max(dy) < s
-    } else {
-        dx * dx + dy * dy < s * s
-    }
+    dx * dx + dy * dy < s * s
 }
 
 /// The check of pins on the layer below the lowest routing layer against
