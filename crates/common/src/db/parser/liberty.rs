@@ -904,7 +904,7 @@ impl Interpreter {
             max_fanout: None,
             fanout_load: None,
             function: None,
-            three_state: None,
+            tristate_enable: None,
             is_clock: false,
             clock_gate: ClockGatePin::None,
             clock_tree_paths: Vec::new(),
@@ -965,7 +965,7 @@ impl Interpreter {
             port.function = Some(function);
         }
         if let Some(three_state) = self.function_attr(group, "three_state")? {
-            port.three_state = Some(three_state);
+            port.tristate_enable = Some(three_state.inverted());
         }
         if group.attr("clock").is_some() {
             port.is_clock = Self::bool_attr(group, "clock");
@@ -1254,14 +1254,17 @@ fn axis_variable(name: &str) -> Option<AxisVariable> {
 
 /// The sense of an arc from `from` that its timing group leaves out, as
 /// `OpenSTA` finds it: from the output's function for a combinational arc,
-/// from its `three_state` condition for a tristate one.
+/// from its tristate enable for a tristate one.
 fn inferred_sense(to: &LibPort, role: ArcRole, from: &str) -> Option<TimingSense> {
     match role {
         ArcRole::Combinational => to.function.as_ref()?.port_timing_sense(from),
-        ArcRole::TristateEnable => {
-            Some(to.three_state.as_ref()?.port_timing_sense(from)?.opposite())
-        }
-        ArcRole::TristateDisable => to.three_state.as_ref()?.port_timing_sense(from),
+        ArcRole::TristateEnable => to.tristate_enable.as_ref()?.port_timing_sense(from),
+        ArcRole::TristateDisable => Some(
+            to.tristate_enable
+                .as_ref()?
+                .port_timing_sense(from)?
+                .opposite(),
+        ),
         _ => None,
     }
 }

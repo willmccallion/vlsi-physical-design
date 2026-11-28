@@ -730,8 +730,9 @@ pub struct LibPort {
     pub fanout_load: Option<f64>,
     /// The logic it carries, for an output.
     pub function: Option<FuncExpr>,
-    /// The condition enabling a tristate output.
-    pub three_state: Option<FuncExpr>,
+    /// The condition enabling a tristate output: the inverse of its
+    /// Liberty `three_state` condition, as `OpenSTA`'s `tristateEnable`.
+    pub tristate_enable: Option<FuncExpr>,
     /// Whether it is a clock input.
     pub is_clock: bool,
     /// Its part in an integrated clock gate.
@@ -1003,7 +1004,7 @@ impl LibCell {
                 let q = &other.ports[i];
                 q.direction == p.direction
                     && FuncExpr::equiv_opt(p.function.as_ref(), q.function.as_ref())
-                    && FuncExpr::equiv_opt(p.three_state.as_ref(), q.three_state.as_ref())
+                    && FuncExpr::equiv_opt(p.tristate_enable.as_ref(), q.tristate_enable.as_ref())
             })
         }) && self.pg_pins.iter().all(|pg| other.pg_pins.contains(pg))
     }
@@ -1288,6 +1289,16 @@ impl FuncExpr {
             return Err(parser.error(format!("unexpected '{c}' at {at}")));
         }
         Ok(expr)
+    }
+
+    /// The negation of the expression, unwrapping one that is already a
+    /// negation, as `OpenSTA`'s `FuncExpr::invert`.
+    #[must_use]
+    pub fn inverted(self) -> Self {
+        match self {
+            Self::Not(inner) => *inner,
+            other => Self::Not(Box::new(other)),
+        }
     }
 
     /// Whether two expressions have the same shape, as `OpenSTA`'s
