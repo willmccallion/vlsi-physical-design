@@ -32,7 +32,7 @@ jobs:
           RUSTDOCFLAGS: -D rustdoc::all
 
   # Line coverage of the product code fails below 90%. Test code lives in files of its own
-  # (tests.rs, tests/, testing.rs, fixtures.rs), which the count leaves out.
+  # (tests.rs, tests/, testing.rs, testing/, fixtures.rs), which the count leaves out.
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -45,4 +45,4 @@ jobs:
           tool: cargo-llvm-cov
       - run: >-
           cargo llvm-cov --workspace --locked --summary-only --fail-under-lines 90
-          --ignore-filename-regex '(^|/)(\w+_)?tests(/|\.rs$)|/(testing|fixtures)\.rs$'
+          --ignore-filename-regex '(^|/)(\w+_)?tests(/|\.rs$)|/(testing|fixtures)(\.rs$|/)'
