@@ -178,3 +178,19 @@ fn a_driver_taken_in_again_stays_listed_once() {
         assert_eq!(resizer.graph.drivers(other), [b3]);
     });
 }
+
+#[test]
+fn the_only_driver_of_a_net_is_listed_even_when_the_net_lists_it_before_others() {
+    on_shared_bus(|resizer| {
+        let bus = resizer.db.net_id("bus").unwrap();
+        let (first, second) = (pin(resizer.db, "b1/Z"), pin(resizer.db, "b2/Z"));
+        resizer.graph.pin_disconnected(bus, first);
+        resizer.graph.pin_disconnected(bus, second);
+
+        resizer
+            .graph
+            .pin_connected(&Netlist::new(resizer.db, resizer.link), first);
+
+        assert_eq!(resizer.graph.drivers(bus), [first]);
+    });
+}
