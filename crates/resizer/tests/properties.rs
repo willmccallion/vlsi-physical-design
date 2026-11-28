@@ -3,17 +3,17 @@
 //! the load; a Steiner tree spans its pins, no shorter than half their
 //! bounding box's perimeter and no longer than the star from the driver;
 //! design repair drives every load from its old driver through buffers
-//! alone.
+//! alone, and splits a net over the fanout limit until none is.
 
 #![allow(clippy::unwrap_used)]
 
 mod common;
 
-use common::{Work, at, clock_cells, repaired_in_session};
+use common::{Work, at, cells_counting_fanout, clock_cells, repaired_in_session};
 use pare_common::db::design::{NetlistDB, PinOwner};
 use pare_common::db::indices::{CellId, NetId, PinId};
 use pare_common::db::liberty::{Liberty, TimingArc};
-use pare_common::db::library::PinDirection;
+use pare_common::db::library::{PinDirection, SignalUse};
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::point::Point;
 use pare_common::units::{Farads, Ohms, Seconds};
@@ -116,10 +116,12 @@ fn work_of(net: &FanoutNet) -> Work {
     Work { cells, nets }
 }
 
-/// The design of `net` after design repair.
-fn repaired(net: &FanoutNet, lib: &Liberty) -> NetlistDB {
-    let constraints = "create_clock -name core -period 1.0 [get_ports clk]\n\
-                       set_input_delay 0.1 -clock core [get_ports in0]\n";
+/// The clock and input delay every generated design is timed under.
+const CONSTRAINTS: &str = "create_clock -name core -period 1.0 [get_ports clk]\n\
+                           set_input_delay 0.1 -clock core [get_ports in0]\n";
+
+/// The design of `net` after design repair under `constraints`.
+fn repaired(net: &FanoutNet, lib: &Liberty, constraints: &str) -> NetlistDB {
     let (_, db) = repaired_in_session(work_of(net), constraints, lib, |resizer| {
         Repairer::new(resizer).repair_design().unwrap()
     });
@@ -250,7 +252,7 @@ proptest! {
     fn design_repair_drives_every_flop_from_its_buffer_through_buffers_alone(net in fanout_net()) {
         let lib = clock_cells();
 
-        let db = repaired(&net, &lib);
+        let db = repaired(&net, &lib, CONSTRAINTS);
 
         let fan = db.cell_id("fan").unwrap();
         for i in 0..net.sinks.len() {
@@ -264,6 +266,22 @@ proptest! {
                 cell = cell_of(&db, driver_of(&db, db.pins[input_of(&db, cell)].net));
             }
             prop_assert_eq!(cell, fan, "s{} never reaches fan", i);
+        }
+    }
+
+    #[test]
+    fn design_repair_leaves_no_signal_net_over_the_fanout_limit(
+        net in fanout_net(),
+        max_fanout in 2..12_usize,
+    ) {
+        let lib = cells_counting_fanout();
+        let constraints = format!("{CONSTRAINTS}set_max_fanout {max_fanout} [current_design]\n");
+
+        let db = repaired(&net, &lib, &constraints);
+
+        for n in db.nets.ids().filter(|&n| db.nets[n].signal_use != SignalUse::Clock) {
+            let loads = db.nets[n].pins.iter().filter(|&&p| !drives(&db, p)).count();
+            prop_assert!(loads <= max_fanout, "{} loads {loads}", db.nets[n].name);
         }
     }
 }

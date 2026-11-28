@@ -8,7 +8,9 @@
 
 use crate::bnet::{self, BnetPtr, Kind};
 use crate::library::SizingLimits;
-use crate::resizer::{PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu};
+use crate::resizer::{
+    InsertedBuffer, PortSlews, RepairError, Resizer, Timing, gate_slew, meters_to_dbu,
+};
 use pare_common::convert::NearestFrom;
 use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::PinOwner;
@@ -17,7 +19,10 @@ use pare_common::db::liberty::{ArcRole, BufferCell, LibCellId};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
 use pare_common::units::{CellArea, Farads, FaradsPerMeter, Meters, Ohms, OhmsPerMeter, Seconds};
+use regions::LoadRegion;
 use std::collections::HashSet;
+
+mod regions;
 
 /// How far short of the computed split a repeater is placed, as
 /// `RepairDesign::repairNetWire`'s `length_margin`.
@@ -30,6 +35,8 @@ pub struct RepairSummary {
     pub slew_violations: usize,
     /// Drivers whose load broke their capacitance limit.
     pub cap_violations: usize,
+    /// Drivers whose loads broke their fanout limit.
+    pub fanout_violations: usize,
     /// Nets with a wire over the length limit.
     pub length_violations: usize,
     /// Nets changed.
@@ -53,8 +60,11 @@ struct NetNeeds {
 /// Which limits a net's repair checks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Checks {
-    /// Slews, loads and wire length.
+    /// Fanout, slews, loads and wire length.
     All,
+    /// Slews, loads and wire length, as a fanout repeater's own net is
+    /// repaired.
+    WithoutFanout,
     /// Wire length alone, as clock nets are repaired.
     LengthOnly,
 }
@@ -269,23 +279,32 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         Ok(self.summary)
     }
 
-    /// `RepairDesign::repairNet` for one driver: its own slew repaired by
-    /// sizing, then its net buffered where loads, load slews or wire
-    /// lengths still break their limits.
-    // NOTE: RepairDesign::repairNet first splits a net over its fanout limit
-    // with region repeaters (findLoadRegions, makeRegionRepeaters); PARE has
-    // not ported them and leaves fanout violations to setup repair.
+    /// `RepairDesign::repairNet` for one driver: its loads split under
+    /// repeaters when they break its fanout limit, its own slew repaired by
+    /// sizing, then its net buffered where loads, load slews or wire lengths
+    /// still break their limits.
     fn repair_net(&mut self, driver: PinId, checks: Checks) -> Result<(), RepairError> {
+        let split = checks == Checks::All && self.repair_fanout(driver)?;
+        let buffered = self.repair_limits(driver, checks)?;
+        if split || buffered {
+            self.summary.repaired_nets += 1;
+        }
+        Ok(())
+    }
+
+    /// The driver resized and its net buffered for the limits `checks`
+    /// reads but fanout; whether its net was buffered.
+    fn repair_limits(&mut self, driver: PinId, checks: Checks) -> Result<bool, RepairError> {
         let tristate = self.resizer.is_tristate_driver(driver);
         let needs = match checks {
-            Checks::All => self.check_limits(driver)?,
+            Checks::All | Checks::WithoutFanout => self.check_limits(driver)?,
             Checks::LengthOnly => NetNeeds::default(),
         };
         if tristate {
-            return Ok(());
+            return Ok(false);
         }
         let Some(tree) = self.resizer.buffered_tree(driver)? else {
-            return Ok(());
+            return Ok(false);
         };
         let too_long = self
             .resizer
@@ -296,14 +315,130 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             self.summary.length_violations += 1;
         }
         if needs.max_cap.is_none() && !needs.load_slew && !too_long {
-            return Ok(());
+            return Ok(false);
         }
         let batch = self.resizer.batch_edits();
         let repaired = self.repair_tree(&tree, driver, needs.max_cap.unwrap_or(Farads::INFINITY));
         self.resizer.flush(batch);
         let _ = repaired?;
-        self.summary.repaired_nets += 1;
+        Ok(true)
+    }
+
+    /// Splits the loads of `driver`'s net under region repeaters when they
+    /// load it past its fanout limit, as the fanout check at the head of
+    /// `RepairDesign::repairNet`; whether they did.
+    fn repair_fanout(&mut self, driver: PinId) -> Result<bool, RepairError> {
+        let Some(limit) = self.resizer.fanout_limit(driver) else {
+            return Ok(false);
+        };
+        if self.resizer.fanout_load(driver) <= limit {
+            return Ok(false);
+        }
+        self.summary.fanout_violations += 1;
+        // NOTE: kept: findLoadRegions and makeRegionRepeaters take the
+        // limit as an int, which cuts a fraction off.
+        let max_fanout = usize::saturating_from(limit);
+        let one_micron = Dbu::new(i64::from(self.resizer.db.library.dbu_per_micron.get()));
+        let mut region = LoadRegion::split(&self.load_points(driver), max_fanout, one_micron);
+        self.make_region_repeaters(&mut region, max_fanout, driver)?;
+        Ok(true)
+    }
+
+    /// Every load of `driver`'s net and where it stands, as `findLoads`.
+    fn load_points(&self, driver: PinId) -> Vec<(PinId, Point<Dbu>)> {
+        let netlist = self.resizer.netlist();
+        let net = self.resizer.db.pins[driver].net;
+        netlist
+            .loads(net)
+            .filter(|&load| load != driver)
+            .map(|load| (load, netlist.pin_location(load)))
+            .collect()
+    }
+
+    /// Buffers the loads `region`'s halves leave, theirs first and each
+    /// half's last first, in groups of `max_fanout`, leaving the repeaters'
+    /// inputs, and a remainder short of half a group, with the region, as
+    /// `makeRegionRepeaters`.
+    fn make_region_repeaters(
+        &mut self,
+        region: &mut LoadRegion,
+        max_fanout: usize,
+        driver: PinId,
+    ) -> Result<(), RepairError> {
+        let LoadRegion { pins, halves } = region;
+        let Some(halves) = halves else {
+            return Ok(());
+        };
+        for half in halves.iter_mut() {
+            self.make_region_repeaters(half, max_fanout, driver)?;
+        }
+        let pending: Vec<PinId> = halves
+            .iter_mut()
+            .flat_map(|half| std::mem::take(&mut half.pins).into_iter().rev())
+            .chain(std::mem::take(pins).into_iter().rev())
+            .collect();
+        let mut group = Vec::new();
+        let mut inputs = Vec::new();
+        for pin in pending {
+            group.push(pin);
+            if group.len() == max_fanout {
+                self.make_fanout_repeater(&mut group, &mut inputs, driver)?;
+            }
+        }
+        if !group.is_empty() && group.len() >= max_fanout / 2 {
+            self.make_fanout_repeater(&mut group, &mut inputs, driver)?;
+        } else {
+            *pins = group;
+        }
+        pins.extend(inputs);
         Ok(())
+    }
+
+    /// Buffers `group` with the weakest buffer at its load nearest the
+    /// driver, repairs the repeater's own net but for its fanout and adds the
+    /// repeater's input to `inputs`, as `makeFanoutRepeater`; `group` is left
+    /// as it is when nothing could be inserted.
+    fn make_fanout_repeater(
+        &mut self,
+        group: &mut Vec<PinId>,
+        inputs: &mut Vec<PinId>,
+        driver: PinId,
+    ) -> Result<(), RepairError> {
+        let at = self.nearest_load_point(driver, group);
+        let buffer = self.resizer.buffers.lowest_drive;
+        let Some(inserted) = self.insert_repeater("fanout", at, buffer, group)? else {
+            return Ok(());
+        };
+        self.repair_repeater_net(inserted.output)?;
+        inputs.push(inserted.input);
+        group.clear();
+        Ok(())
+    }
+
+    /// Where the load of `loads` nearest `driver` stands, the first of those
+    /// equally near, as `findClosedPinLoc`.
+    fn nearest_load_point(&self, driver: PinId, loads: &[PinId]) -> Point<Dbu> {
+        let netlist = self.resizer.netlist();
+        let from = netlist.pin_location(driver);
+        loads
+            .iter()
+            .map(|&load| netlist.pin_location(load))
+            .min_by_key(|at| at.manhattan(from))
+            .unwrap_or(from)
+    }
+
+    /// Repairs a fanout repeater's own net but for its fanout, counting what
+    /// that inserts and resizes but not the violations it finds, as
+    /// `makeFanoutRepeater` keeps its `repairNet`'s counts apart.
+    fn repair_repeater_net(&mut self, driver: PinId) -> Result<(), RepairError> {
+        let counted = self.summary.clone();
+        let repaired = self.repair_net(driver, Checks::WithoutFanout);
+        self.summary = RepairSummary {
+            inserted: self.summary.inserted,
+            resized: self.summary.resized,
+            ..counted
+        };
+        repaired
     }
 
     /// Checks the driver's slew, resizing it when the slew is over its
@@ -845,14 +980,9 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
         buffer: BufferCell,
         branch: &mut Branch,
     ) -> Result<bool, RepairError> {
-        if branch.loads.is_empty() {
+        let Some(inserted) = self.insert_repeater(reason, at, buffer, &branch.loads)? else {
             return Ok(false);
-        }
-        let old_net = self.resizer.db.pins[branch.loads[0]].net;
-        let inserted =
-            self.resizer
-                .insert_buffer_before_loads(old_net, &branch.loads, buffer, at, reason)?;
-        self.summary.inserted += 1;
+        };
         let _ = self.resizer.resize_to_target_slew(inserted.output)?;
         let sized = match self.resizer.link.cell(self.resizer.db, inserted.cell) {
             Some((id, _)) => self.resizer.as_buffer(id)?,
@@ -869,6 +999,26 @@ impl<'r, 'a, T: Timing> Repairer<'r, 'a, T> {
             .fanout_load(sized_cell, in_lib_port);
         branch.max_load_slew = self.resizer.max_input_slew(sized_cell, in_lib_port);
         Ok(true)
+    }
+
+    /// Inserts a buffer of `buffer` at `at` driving `loads`, unsized, as
+    /// `RepairDesign::makeRepeater` begins; none when there are no loads.
+    fn insert_repeater(
+        &mut self,
+        reason: &str,
+        at: Point<Dbu>,
+        buffer: BufferCell,
+        loads: &[PinId],
+    ) -> Result<Option<InsertedBuffer>, RepairError> {
+        let Some(&first) = loads.first() else {
+            return Ok(None);
+        };
+        let net = self.resizer.db.pins[first].net;
+        let inserted = self
+            .resizer
+            .insert_buffer_before_loads(net, loads, buffer, at, reason)?;
+        self.summary.inserted += 1;
+        Ok(Some(inserted))
     }
 }
 /// The point `distance` back from `to` toward `from` along the straight

@@ -77,6 +77,18 @@ pub fn clock_cells() -> Liberty {
     liberty::parse_file(&fixture("clock.lib")).unwrap()
 }
 
+/// The clock test cells with every input counting one toward the fanout
+/// of the net it loads, which the library itself leaves out.
+pub fn cells_counting_fanout() -> Liberty {
+    let mut lib = clock_cells();
+    for cell in &mut lib.cells {
+        for port in cell.ports.iter_mut().filter(|p| p.is_input()) {
+            port.fanout_load = Some(1.0);
+        }
+    }
+    lib
+}
+
 /// What `repair` returns from a timed session over the design of `work`
 /// under the SDC `constraints`, with `lib` as its library, and the design
 /// once the session ends.
