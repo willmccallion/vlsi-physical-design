@@ -603,6 +603,7 @@ fn a_gate_of_two_outputs_is_not_single_output() {
 /// its drive resistance and its delay; a slow input adds 0.01 to the delay.
 fn tuned_buffer(name: &str, slew: f64, delay: f64) -> String {
     let slow = format!("{:.2}", delay + 0.01);
+    let blunt = format!("{:.2}", slew + 0.01);
     format!(
         "cell ({name}) {{ area : 0.8 ;
                pin (A) {{ direction : input ; capacitance : 0.97 ; }}
@@ -610,8 +611,8 @@ fn tuned_buffer(name: &str, slew: f64, delay: f64) -> String {
                  timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ;
                    cell_rise (delay_t) {{ values (\"0.03, {delay}\", \"0.04, {slow}\") ; }}
                    cell_fall (delay_t) {{ values (\"0.03, {delay}\", \"0.04, {slow}\") ; }}
-                   rise_transition (delay_t) {{ values (\"0.01, {slew}\", \"0.02, {slew}\") ; }}
-                   fall_transition (delay_t) {{ values (\"0.01, {slew}\", \"0.02, {slew}\") ; }} }} }} }}\n"
+                   rise_transition (delay_t) {{ values (\"0.01, {slew}\", \"0.02, {blunt}\") ; }}
+                   fall_transition (delay_t) {{ values (\"0.01, {slew}\", \"0.02, {blunt}\") ; }} }} }} }}\n"
     )
 }
 
