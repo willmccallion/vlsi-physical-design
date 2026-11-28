@@ -3,6 +3,8 @@ CLKBUF_X3 A->Z Rise>Rise in 0 out 5.000 load 0.4425
 CLKBUF_X3 A->Z Rise>Rise in 0 out 30.000 load 22.0947
 CLKBUF_X3 A->Z Rise>Rise in 0 out 80.000 load 65.4297
 CLKBUF_X3 A->Z Rise>Rise in 0 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Rise>Rise in 0 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Rise>Rise in 0 out 2000.000 load 1718.7500
 CLKBUF_X3 A->Z Rise>Rise in 0 out 4.488 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 0 out 1157.040 load 992.1875
 CLKBUF_X3 A->Z Rise>Rise in 0 out 580.764 load 496.0937
@@ -10,6 +12,8 @@ CLKBUF_X3 A->Z Rise>Rise in 10 out 5.000 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 10 out 30.000 load 21.4844
 CLKBUF_X3 A->Z Rise>Rise in 10 out 80.000 load 64.9414
 CLKBUF_X3 A->Z Rise>Rise in 10 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Rise>Rise in 10 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Rise>Rise in 10 out 2000.000 load 1718.7500
 CLKBUF_X3 A->Z Rise>Rise in 10 out 5.208 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 10 out 1155.688 load 992.1875
 CLKBUF_X3 A->Z Rise>Rise in 10 out 580.448 load 496.0937
@@ -17,6 +21,8 @@ CLKBUF_X3 A->Z Rise>Rise in 60 out 5.000 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 60 out 30.000 load 18.5547
 CLKBUF_X3 A->Z Rise>Rise in 60 out 80.000 load 62.0117
 CLKBUF_X3 A->Z Rise>Rise in 60 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Rise>Rise in 60 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Rise>Rise in 60 out 2000.000 load 1734.3750
 CLKBUF_X3 A->Z Rise>Rise in 60 out 8.809 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 60 out 1148.928 load 992.1875
 CLKBUF_X3 A->Z Rise>Rise in 60 out 578.868 load 496.0937
@@ -24,6 +30,8 @@ CLKBUF_X3 A->Z Rise>Rise in 200 out 5.000 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 200 out 30.000 load 9.9487
 CLKBUF_X3 A->Z Rise>Rise in 200 out 80.000 load 54.6875
 CLKBUF_X3 A->Z Rise>Rise in 200 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Rise>Rise in 200 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Rise>Rise in 200 out 2000.000 load 1781.2500
 CLKBUF_X3 A->Z Rise>Rise in 200 out 18.889 load 0.0000
 CLKBUF_X3 A->Z Rise>Rise in 200 out 1130.000 load 992.1875
 CLKBUF_X3 A->Z Rise>Rise in 200 out 574.444 load 496.0937
@@ -31,6 +39,8 @@ CLKBUF_X3 A->Z Fall>Fall in 0 out 5.000 load 0.4425
 CLKBUF_X3 A->Z Fall>Fall in 0 out 30.000 load 22.0947
 CLKBUF_X3 A->Z Fall>Fall in 0 out 80.000 load 65.4297
 CLKBUF_X3 A->Z Fall>Fall in 0 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Fall>Fall in 0 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Fall>Fall in 0 out 2000.000 load 1718.7500
 CLKBUF_X3 A->Z Fall>Fall in 0 out 4.488 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 0 out 1157.040 load 992.1875
 CLKBUF_X3 A->Z Fall>Fall in 0 out 580.764 load 496.0937
@@ -38,6 +48,8 @@ CLKBUF_X3 A->Z Fall>Fall in 10 out 5.000 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 10 out 30.000 load 21.4844
 CLKBUF_X3 A->Z Fall>Fall in 10 out 80.000 load 64.9414
 CLKBUF_X3 A->Z Fall>Fall in 10 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Fall>Fall in 10 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Fall>Fall in 10 out 2000.000 load 1718.7500
 CLKBUF_X3 A->Z Fall>Fall in 10 out 5.208 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 10 out 1155.688 load 992.1875
 CLKBUF_X3 A->Z Fall>Fall in 10 out 580.448 load 496.0937
@@ -45,6 +57,8 @@ CLKBUF_X3 A->Z Fall>Fall in 60 out 5.000 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 60 out 30.000 load 18.5547
 CLKBUF_X3 A->Z Fall>Fall in 60 out 80.000 load 62.0117
 CLKBUF_X3 A->Z Fall>Fall in 60 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Fall>Fall in 60 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Fall>Fall in 60 out 2000.000 load 1734.3750
 CLKBUF_X3 A->Z Fall>Fall in 60 out 8.809 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 60 out 1148.928 load 992.1875
 CLKBUF_X3 A->Z Fall>Fall in 60 out 578.868 load 496.0937
@@ -52,6 +66,8 @@ CLKBUF_X3 A->Z Fall>Fall in 200 out 5.000 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 200 out 30.000 load 9.9487
 CLKBUF_X3 A->Z Fall>Fall in 200 out 80.000 load 54.6875
 CLKBUF_X3 A->Z Fall>Fall in 200 out 400.000 load 341.7969
+CLKBUF_X3 A->Z Fall>Fall in 200 out 500.000 load 429.6875
+CLKBUF_X3 A->Z Fall>Fall in 200 out 2000.000 load 1781.2500
 CLKBUF_X3 A->Z Fall>Fall in 200 out 18.889 load 0.0000
 CLKBUF_X3 A->Z Fall>Fall in 200 out 1130.000 load 992.1875
 CLKBUF_X3 A->Z Fall>Fall in 200 out 574.444 load 496.0937
@@ -60,6 +76,8 @@ BUF_X1 A->Z Rise>Rise in 0 out 5.000 load 0.0000
 BUF_X1 A->Z Rise>Rise in 0 out 30.000 load 6.1035
 BUF_X1 A->Z Rise>Rise in 0 out 80.000 load 18.7988
 BUF_X1 A->Z Rise>Rise in 0 out 400.000 load 99.6094
+BUF_X1 A->Z Rise>Rise in 0 out 500.000 load 125.0000
+BUF_X1 A->Z Rise>Rise in 0 out 2000.000 load 503.9063
 BUF_X1 A->Z Rise>Rise in 0 out 5.804 load 0.0000
 BUF_X1 A->Z Rise>Rise in 0 out 3945.198 load 992.1875
 BUF_X1 A->Z Rise>Rise in 0 out 1975.501 load 496.0937
@@ -67,6 +85,8 @@ BUF_X1 A->Z Rise>Rise in 10 out 5.000 load 0.0000
 BUF_X1 A->Z Rise>Rise in 10 out 30.000 load 5.9814
 BUF_X1 A->Z Rise>Rise in 10 out 80.000 load 18.6768
 BUF_X1 A->Z Rise>Rise in 10 out 400.000 load 99.6094
+BUF_X1 A->Z Rise>Rise in 10 out 500.000 load 125.0000
+BUF_X1 A->Z Rise>Rise in 10 out 2000.000 load 503.9063
 BUF_X1 A->Z Rise>Rise in 10 out 6.317 load 0.0000
 BUF_X1 A->Z Rise>Rise in 10 out 3945.711 load 992.1875
 BUF_X1 A->Z Rise>Rise in 10 out 1976.014 load 496.0937
@@ -74,6 +94,8 @@ BUF_X1 A->Z Rise>Rise in 60 out 5.000 load 0.0000
 BUF_X1 A->Z Rise>Rise in 60 out 30.000 load 5.3406
 BUF_X1 A->Z Rise>Rise in 60 out 80.000 load 17.9443
 BUF_X1 A->Z Rise>Rise in 60 out 400.000 load 98.6328
+BUF_X1 A->Z Rise>Rise in 60 out 500.000 load 124.0234
+BUF_X1 A->Z Rise>Rise in 60 out 2000.000 load 503.9063
 BUF_X1 A->Z Rise>Rise in 60 out 8.881 load 0.0000
 BUF_X1 A->Z Rise>Rise in 60 out 3948.275 load 992.1875
 BUF_X1 A->Z Rise>Rise in 60 out 1978.578 load 496.0937
@@ -81,6 +103,8 @@ BUF_X1 A->Z Rise>Rise in 200 out 5.000 load 0.0000
 BUF_X1 A->Z Rise>Rise in 200 out 30.000 load 3.5095
 BUF_X1 A->Z Rise>Rise in 200 out 80.000 load 16.1133
 BUF_X1 A->Z Rise>Rise in 200 out 400.000 load 97.1680
+BUF_X1 A->Z Rise>Rise in 200 out 500.000 load 122.0703
+BUF_X1 A->Z Rise>Rise in 200 out 2000.000 load 500.0000
 BUF_X1 A->Z Rise>Rise in 200 out 16.061 load 0.0000
 BUF_X1 A->Z Rise>Rise in 200 out 3955.455 load 992.1875
 BUF_X1 A->Z Rise>Rise in 200 out 1985.758 load 496.0937
@@ -88,6 +112,8 @@ BUF_X1 A->Z Fall>Fall in 0 out 5.000 load 0.0000
 BUF_X1 A->Z Fall>Fall in 0 out 30.000 load 6.1035
 BUF_X1 A->Z Fall>Fall in 0 out 80.000 load 18.7988
 BUF_X1 A->Z Fall>Fall in 0 out 400.000 load 99.6094
+BUF_X1 A->Z Fall>Fall in 0 out 500.000 load 125.0000
+BUF_X1 A->Z Fall>Fall in 0 out 2000.000 load 503.9063
 BUF_X1 A->Z Fall>Fall in 0 out 5.804 load 0.0000
 BUF_X1 A->Z Fall>Fall in 0 out 3945.198 load 992.1875
 BUF_X1 A->Z Fall>Fall in 0 out 1975.501 load 496.0937
@@ -95,6 +121,8 @@ BUF_X1 A->Z Fall>Fall in 10 out 5.000 load 0.0000
 BUF_X1 A->Z Fall>Fall in 10 out 30.000 load 5.9814
 BUF_X1 A->Z Fall>Fall in 10 out 80.000 load 18.6768
 BUF_X1 A->Z Fall>Fall in 10 out 400.000 load 99.6094
+BUF_X1 A->Z Fall>Fall in 10 out 500.000 load 125.0000
+BUF_X1 A->Z Fall>Fall in 10 out 2000.000 load 503.9063
 BUF_X1 A->Z Fall>Fall in 10 out 6.317 load 0.0000
 BUF_X1 A->Z Fall>Fall in 10 out 3945.711 load 992.1875
 BUF_X1 A->Z Fall>Fall in 10 out 1976.014 load 496.0937
@@ -102,6 +130,8 @@ BUF_X1 A->Z Fall>Fall in 60 out 5.000 load 0.0000
 BUF_X1 A->Z Fall>Fall in 60 out 30.000 load 5.3406
 BUF_X1 A->Z Fall>Fall in 60 out 80.000 load 17.9443
 BUF_X1 A->Z Fall>Fall in 60 out 400.000 load 98.6328
+BUF_X1 A->Z Fall>Fall in 60 out 500.000 load 124.0234
+BUF_X1 A->Z Fall>Fall in 60 out 2000.000 load 503.9063
 BUF_X1 A->Z Fall>Fall in 60 out 8.881 load 0.0000
 BUF_X1 A->Z Fall>Fall in 60 out 3948.275 load 992.1875
 BUF_X1 A->Z Fall>Fall in 60 out 1978.578 load 496.0937
@@ -109,6 +139,8 @@ BUF_X1 A->Z Fall>Fall in 200 out 5.000 load 0.0000
 BUF_X1 A->Z Fall>Fall in 200 out 30.000 load 3.5095
 BUF_X1 A->Z Fall>Fall in 200 out 80.000 load 16.1133
 BUF_X1 A->Z Fall>Fall in 200 out 400.000 load 97.1680
+BUF_X1 A->Z Fall>Fall in 200 out 500.000 load 122.0703
+BUF_X1 A->Z Fall>Fall in 200 out 2000.000 load 500.0000
 BUF_X1 A->Z Fall>Fall in 200 out 16.061 load 0.0000
 BUF_X1 A->Z Fall>Fall in 200 out 3955.455 load 992.1875
 BUF_X1 A->Z Fall>Fall in 200 out 1985.758 load 496.0937
@@ -117,6 +149,8 @@ AND2_X1 A->Z Rise>Rise in 0 out 5.000 load 0.0000
 AND2_X1 A->Z Rise>Rise in 0 out 30.000 load 6.1035
 AND2_X1 A->Z Rise>Rise in 0 out 80.000 load 18.7988
 AND2_X1 A->Z Rise>Rise in 0 out 400.000 load 99.6094
+AND2_X1 A->Z Rise>Rise in 0 out 500.000 load 125.0000
+AND2_X1 A->Z Rise>Rise in 0 out 2000.000 load 503.9063
 AND2_X1 A->Z Rise>Rise in 0 out 5.804 load 0.0000
 AND2_X1 A->Z Rise>Rise in 0 out 3945.198 load 992.1875
 AND2_X1 A->Z Rise>Rise in 0 out 1975.501 load 496.0937
@@ -124,6 +158,8 @@ AND2_X1 A->Z Rise>Rise in 10 out 5.000 load 0.0000
 AND2_X1 A->Z Rise>Rise in 10 out 30.000 load 5.9814
 AND2_X1 A->Z Rise>Rise in 10 out 80.000 load 18.6768
 AND2_X1 A->Z Rise>Rise in 10 out 400.000 load 99.6094
+AND2_X1 A->Z Rise>Rise in 10 out 500.000 load 125.0000
+AND2_X1 A->Z Rise>Rise in 10 out 2000.000 load 503.9063
 AND2_X1 A->Z Rise>Rise in 10 out 6.317 load 0.0000
 AND2_X1 A->Z Rise>Rise in 10 out 3945.711 load 992.1875
 AND2_X1 A->Z Rise>Rise in 10 out 1976.014 load 496.0937
@@ -131,6 +167,8 @@ AND2_X1 A->Z Rise>Rise in 60 out 5.000 load 0.0000
 AND2_X1 A->Z Rise>Rise in 60 out 30.000 load 5.3406
 AND2_X1 A->Z Rise>Rise in 60 out 80.000 load 17.9443
 AND2_X1 A->Z Rise>Rise in 60 out 400.000 load 98.6328
+AND2_X1 A->Z Rise>Rise in 60 out 500.000 load 124.0234
+AND2_X1 A->Z Rise>Rise in 60 out 2000.000 load 503.9063
 AND2_X1 A->Z Rise>Rise in 60 out 8.881 load 0.0000
 AND2_X1 A->Z Rise>Rise in 60 out 3948.275 load 992.1875
 AND2_X1 A->Z Rise>Rise in 60 out 1978.578 load 496.0937
@@ -138,6 +176,8 @@ AND2_X1 A->Z Rise>Rise in 200 out 5.000 load 0.0000
 AND2_X1 A->Z Rise>Rise in 200 out 30.000 load 3.5095
 AND2_X1 A->Z Rise>Rise in 200 out 80.000 load 16.1133
 AND2_X1 A->Z Rise>Rise in 200 out 400.000 load 97.1680
+AND2_X1 A->Z Rise>Rise in 200 out 500.000 load 122.0703
+AND2_X1 A->Z Rise>Rise in 200 out 2000.000 load 500.0000
 AND2_X1 A->Z Rise>Rise in 200 out 16.061 load 0.0000
 AND2_X1 A->Z Rise>Rise in 200 out 3955.455 load 992.1875
 AND2_X1 A->Z Rise>Rise in 200 out 1985.758 load 496.0937
@@ -145,6 +185,8 @@ AND2_X1 A->Z Fall>Fall in 0 out 5.000 load 0.0000
 AND2_X1 A->Z Fall>Fall in 0 out 30.000 load 6.1035
 AND2_X1 A->Z Fall>Fall in 0 out 80.000 load 18.7988
 AND2_X1 A->Z Fall>Fall in 0 out 400.000 load 99.6094
+AND2_X1 A->Z Fall>Fall in 0 out 500.000 load 125.0000
+AND2_X1 A->Z Fall>Fall in 0 out 2000.000 load 503.9063
 AND2_X1 A->Z Fall>Fall in 0 out 5.804 load 0.0000
 AND2_X1 A->Z Fall>Fall in 0 out 3945.198 load 992.1875
 AND2_X1 A->Z Fall>Fall in 0 out 1975.501 load 496.0937
@@ -152,6 +194,8 @@ AND2_X1 A->Z Fall>Fall in 10 out 5.000 load 0.0000
 AND2_X1 A->Z Fall>Fall in 10 out 30.000 load 5.9814
 AND2_X1 A->Z Fall>Fall in 10 out 80.000 load 18.6768
 AND2_X1 A->Z Fall>Fall in 10 out 400.000 load 99.6094
+AND2_X1 A->Z Fall>Fall in 10 out 500.000 load 125.0000
+AND2_X1 A->Z Fall>Fall in 10 out 2000.000 load 503.9063
 AND2_X1 A->Z Fall>Fall in 10 out 6.317 load 0.0000
 AND2_X1 A->Z Fall>Fall in 10 out 3945.711 load 992.1875
 AND2_X1 A->Z Fall>Fall in 10 out 1976.014 load 496.0937
@@ -159,6 +203,8 @@ AND2_X1 A->Z Fall>Fall in 60 out 5.000 load 0.0000
 AND2_X1 A->Z Fall>Fall in 60 out 30.000 load 5.3406
 AND2_X1 A->Z Fall>Fall in 60 out 80.000 load 17.9443
 AND2_X1 A->Z Fall>Fall in 60 out 400.000 load 98.6328
+AND2_X1 A->Z Fall>Fall in 60 out 500.000 load 124.0234
+AND2_X1 A->Z Fall>Fall in 60 out 2000.000 load 503.9063
 AND2_X1 A->Z Fall>Fall in 60 out 8.881 load 0.0000
 AND2_X1 A->Z Fall>Fall in 60 out 3948.275 load 992.1875
 AND2_X1 A->Z Fall>Fall in 60 out 1978.578 load 496.0937
@@ -166,6 +212,8 @@ AND2_X1 A->Z Fall>Fall in 200 out 5.000 load 0.0000
 AND2_X1 A->Z Fall>Fall in 200 out 30.000 load 3.5095
 AND2_X1 A->Z Fall>Fall in 200 out 80.000 load 16.1133
 AND2_X1 A->Z Fall>Fall in 200 out 400.000 load 97.1680
+AND2_X1 A->Z Fall>Fall in 200 out 500.000 load 122.0703
+AND2_X1 A->Z Fall>Fall in 200 out 2000.000 load 500.0000
 AND2_X1 A->Z Fall>Fall in 200 out 16.061 load 0.0000
 AND2_X1 A->Z Fall>Fall in 200 out 3955.455 load 992.1875
 AND2_X1 A->Z Fall>Fall in 200 out 1985.758 load 496.0937
@@ -174,6 +222,8 @@ INV_X1 A->ZN Rise>Fall in 0 out 5.000 load 0.2193
 INV_X1 A->ZN Rise>Fall in 0 out 30.000 load 7.4463
 INV_X1 A->ZN Rise>Fall in 0 out 80.000 load 21.8506
 INV_X1 A->ZN Rise>Fall in 0 out 400.000 load 114.2578
+INV_X1 A->ZN Rise>Fall in 0 out 500.000 load 142.5781
+INV_X1 A->ZN Rise>Fall in 0 out 2000.000 load 574.2188
 INV_X1 A->ZN Rise>Fall in 0 out 4.237 load 0.0000
 INV_X1 A->ZN Rise>Fall in 0 out 3459.301 load 992.1875
 INV_X1 A->ZN Rise>Fall in 0 out 1731.769 load 496.0937
@@ -181,6 +231,8 @@ INV_X1 A->ZN Rise>Fall in 10 out 5.000 load 0.0422
 INV_X1 A->ZN Rise>Fall in 10 out 30.000 load 7.2632
 INV_X1 A->ZN Rise>Fall in 10 out 80.000 load 21.7285
 INV_X1 A->ZN Rise>Fall in 10 out 400.000 load 114.2578
+INV_X1 A->ZN Rise>Fall in 10 out 500.000 load 142.5781
+INV_X1 A->ZN Rise>Fall in 10 out 2000.000 load 574.2188
 INV_X1 A->ZN Rise>Fall in 10 out 4.854 load 0.0000
 INV_X1 A->ZN Rise>Fall in 10 out 3458.881 load 992.1875
 INV_X1 A->ZN Rise>Fall in 10 out 1731.867 load 496.0937
@@ -188,6 +240,8 @@ INV_X1 A->ZN Rise>Fall in 60 out 5.000 load 0.0000
 INV_X1 A->ZN Rise>Fall in 60 out 30.000 load 6.3477
 INV_X1 A->ZN Rise>Fall in 60 out 80.000 load 20.8740
 INV_X1 A->ZN Rise>Fall in 60 out 400.000 load 113.2812
+INV_X1 A->ZN Rise>Fall in 60 out 500.000 load 142.5781
+INV_X1 A->ZN Rise>Fall in 60 out 2000.000 load 574.2188
 INV_X1 A->ZN Rise>Fall in 60 out 7.936 load 0.0000
 INV_X1 A->ZN Rise>Fall in 60 out 3456.783 load 992.1875
 INV_X1 A->ZN Rise>Fall in 60 out 1732.359 load 496.0937
@@ -195,6 +249,8 @@ INV_X1 A->ZN Rise>Fall in 200 out 5.000 load 0.0000
 INV_X1 A->ZN Rise>Fall in 200 out 30.000 load 3.9062
 INV_X1 A->ZN Rise>Fall in 200 out 80.000 load 18.4326
 INV_X1 A->ZN Rise>Fall in 200 out 400.000 load 111.3281
+INV_X1 A->ZN Rise>Fall in 200 out 500.000 load 140.6250
+INV_X1 A->ZN Rise>Fall in 200 out 2000.000 load 574.2188
 INV_X1 A->ZN Rise>Fall in 200 out 16.566 load 0.0000
 INV_X1 A->ZN Rise>Fall in 200 out 3450.909 load 992.1875
 INV_X1 A->ZN Rise>Fall in 200 out 1733.737 load 496.0937
@@ -202,6 +258,8 @@ INV_X1 A->ZN Fall>Rise in 0 out 5.000 load 0.2193
 INV_X1 A->ZN Fall>Rise in 0 out 30.000 load 7.4463
 INV_X1 A->ZN Fall>Rise in 0 out 80.000 load 21.8506
 INV_X1 A->ZN Fall>Rise in 0 out 400.000 load 114.2578
+INV_X1 A->ZN Fall>Rise in 0 out 500.000 load 142.5781
+INV_X1 A->ZN Fall>Rise in 0 out 2000.000 load 574.2188
 INV_X1 A->ZN Fall>Rise in 0 out 4.237 load 0.0000
 INV_X1 A->ZN Fall>Rise in 0 out 3459.301 load 992.1875
 INV_X1 A->ZN Fall>Rise in 0 out 1731.769 load 496.0937
@@ -209,6 +267,8 @@ INV_X1 A->ZN Fall>Rise in 10 out 5.000 load 0.0422
 INV_X1 A->ZN Fall>Rise in 10 out 30.000 load 7.2632
 INV_X1 A->ZN Fall>Rise in 10 out 80.000 load 21.7285
 INV_X1 A->ZN Fall>Rise in 10 out 400.000 load 114.2578
+INV_X1 A->ZN Fall>Rise in 10 out 500.000 load 142.5781
+INV_X1 A->ZN Fall>Rise in 10 out 2000.000 load 574.2188
 INV_X1 A->ZN Fall>Rise in 10 out 4.854 load 0.0000
 INV_X1 A->ZN Fall>Rise in 10 out 3458.881 load 992.1875
 INV_X1 A->ZN Fall>Rise in 10 out 1731.867 load 496.0937
@@ -216,6 +276,8 @@ INV_X1 A->ZN Fall>Rise in 60 out 5.000 load 0.0000
 INV_X1 A->ZN Fall>Rise in 60 out 30.000 load 6.3477
 INV_X1 A->ZN Fall>Rise in 60 out 80.000 load 20.8740
 INV_X1 A->ZN Fall>Rise in 60 out 400.000 load 113.2812
+INV_X1 A->ZN Fall>Rise in 60 out 500.000 load 142.5781
+INV_X1 A->ZN Fall>Rise in 60 out 2000.000 load 574.2188
 INV_X1 A->ZN Fall>Rise in 60 out 7.936 load 0.0000
 INV_X1 A->ZN Fall>Rise in 60 out 3456.783 load 992.1875
 INV_X1 A->ZN Fall>Rise in 60 out 1732.359 load 496.0937
@@ -223,6 +285,8 @@ INV_X1 A->ZN Fall>Rise in 200 out 5.000 load 0.0000
 INV_X1 A->ZN Fall>Rise in 200 out 30.000 load 3.9062
 INV_X1 A->ZN Fall>Rise in 200 out 80.000 load 18.4326
 INV_X1 A->ZN Fall>Rise in 200 out 400.000 load 111.3281
+INV_X1 A->ZN Fall>Rise in 200 out 500.000 load 140.6250
+INV_X1 A->ZN Fall>Rise in 200 out 2000.000 load 574.2188
 INV_X1 A->ZN Fall>Rise in 200 out 16.566 load 0.0000
 INV_X1 A->ZN Fall>Rise in 200 out 3450.909 load 992.1875
 INV_X1 A->ZN Fall>Rise in 200 out 1733.737 load 496.0937
@@ -231,6 +295,8 @@ DFF_X1 CK->Q Rise>Rise in 0 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 0 out 30.000 load 6.1035
 DFF_X1 CK->Q Rise>Rise in 0 out 80.000 load 18.7988
 DFF_X1 CK->Q Rise>Rise in 0 out 400.000 load 99.6094
+DFF_X1 CK->Q Rise>Rise in 0 out 500.000 load 125.0000
+DFF_X1 CK->Q Rise>Rise in 0 out 2000.000 load 503.9063
 DFF_X1 CK->Q Rise>Rise in 0 out 5.804 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 0 out 3945.198 load 992.1875
 DFF_X1 CK->Q Rise>Rise in 0 out 1975.501 load 496.0937
@@ -238,6 +304,8 @@ DFF_X1 CK->Q Rise>Rise in 10 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 10 out 30.000 load 5.9814
 DFF_X1 CK->Q Rise>Rise in 10 out 80.000 load 18.6768
 DFF_X1 CK->Q Rise>Rise in 10 out 400.000 load 99.6094
+DFF_X1 CK->Q Rise>Rise in 10 out 500.000 load 125.0000
+DFF_X1 CK->Q Rise>Rise in 10 out 2000.000 load 503.9063
 DFF_X1 CK->Q Rise>Rise in 10 out 6.317 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 10 out 3945.711 load 992.1875
 DFF_X1 CK->Q Rise>Rise in 10 out 1976.014 load 496.0937
@@ -245,6 +313,8 @@ DFF_X1 CK->Q Rise>Rise in 60 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 60 out 30.000 load 5.3406
 DFF_X1 CK->Q Rise>Rise in 60 out 80.000 load 17.9443
 DFF_X1 CK->Q Rise>Rise in 60 out 400.000 load 98.6328
+DFF_X1 CK->Q Rise>Rise in 60 out 500.000 load 124.0234
+DFF_X1 CK->Q Rise>Rise in 60 out 2000.000 load 503.9063
 DFF_X1 CK->Q Rise>Rise in 60 out 8.881 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 60 out 3948.275 load 992.1875
 DFF_X1 CK->Q Rise>Rise in 60 out 1978.578 load 496.0937
@@ -252,6 +322,8 @@ DFF_X1 CK->Q Rise>Rise in 200 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 200 out 30.000 load 3.5095
 DFF_X1 CK->Q Rise>Rise in 200 out 80.000 load 16.1133
 DFF_X1 CK->Q Rise>Rise in 200 out 400.000 load 97.1680
+DFF_X1 CK->Q Rise>Rise in 200 out 500.000 load 122.0703
+DFF_X1 CK->Q Rise>Rise in 200 out 2000.000 load 500.0000
 DFF_X1 CK->Q Rise>Rise in 200 out 16.061 load 0.0000
 DFF_X1 CK->Q Rise>Rise in 200 out 3955.455 load 992.1875
 DFF_X1 CK->Q Rise>Rise in 200 out 1985.758 load 496.0937
@@ -259,6 +331,8 @@ DFF_X1 CK->Q Rise>Fall in 0 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 0 out 30.000 load 6.1035
 DFF_X1 CK->Q Rise>Fall in 0 out 80.000 load 18.7988
 DFF_X1 CK->Q Rise>Fall in 0 out 400.000 load 99.6094
+DFF_X1 CK->Q Rise>Fall in 0 out 500.000 load 125.0000
+DFF_X1 CK->Q Rise>Fall in 0 out 2000.000 load 503.9063
 DFF_X1 CK->Q Rise>Fall in 0 out 5.804 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 0 out 3945.198 load 992.1875
 DFF_X1 CK->Q Rise>Fall in 0 out 1975.501 load 496.0937
@@ -266,6 +340,8 @@ DFF_X1 CK->Q Rise>Fall in 10 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 10 out 30.000 load 5.9814
 DFF_X1 CK->Q Rise>Fall in 10 out 80.000 load 18.6768
 DFF_X1 CK->Q Rise>Fall in 10 out 400.000 load 99.6094
+DFF_X1 CK->Q Rise>Fall in 10 out 500.000 load 125.0000
+DFF_X1 CK->Q Rise>Fall in 10 out 2000.000 load 503.9063
 DFF_X1 CK->Q Rise>Fall in 10 out 6.317 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 10 out 3945.711 load 992.1875
 DFF_X1 CK->Q Rise>Fall in 10 out 1976.014 load 496.0937
@@ -273,6 +349,8 @@ DFF_X1 CK->Q Rise>Fall in 60 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 60 out 30.000 load 5.3406
 DFF_X1 CK->Q Rise>Fall in 60 out 80.000 load 17.9443
 DFF_X1 CK->Q Rise>Fall in 60 out 400.000 load 98.6328
+DFF_X1 CK->Q Rise>Fall in 60 out 500.000 load 124.0234
+DFF_X1 CK->Q Rise>Fall in 60 out 2000.000 load 503.9063
 DFF_X1 CK->Q Rise>Fall in 60 out 8.881 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 60 out 3948.275 load 992.1875
 DFF_X1 CK->Q Rise>Fall in 60 out 1978.578 load 496.0937
@@ -280,6 +358,8 @@ DFF_X1 CK->Q Rise>Fall in 200 out 5.000 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 200 out 30.000 load 3.5095
 DFF_X1 CK->Q Rise>Fall in 200 out 80.000 load 16.1133
 DFF_X1 CK->Q Rise>Fall in 200 out 400.000 load 97.1680
+DFF_X1 CK->Q Rise>Fall in 200 out 500.000 load 122.0703
+DFF_X1 CK->Q Rise>Fall in 200 out 2000.000 load 500.0000
 DFF_X1 CK->Q Rise>Fall in 200 out 16.061 load 0.0000
 DFF_X1 CK->Q Rise>Fall in 200 out 3955.455 load 992.1875
 DFF_X1 CK->Q Rise>Fall in 200 out 1985.758 load 496.0937
@@ -288,6 +368,8 @@ DFF_SLOW CK->Q Rise>Rise in 0 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 0 out 30.000 load 6.1035
 DFF_SLOW CK->Q Rise>Rise in 0 out 80.000 load 18.7988
 DFF_SLOW CK->Q Rise>Rise in 0 out 400.000 load 99.6094
+DFF_SLOW CK->Q Rise>Rise in 0 out 500.000 load 125.0000
+DFF_SLOW CK->Q Rise>Rise in 0 out 2000.000 load 503.9063
 DFF_SLOW CK->Q Rise>Rise in 0 out 5.804 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 0 out 3945.198 load 992.1875
 DFF_SLOW CK->Q Rise>Rise in 0 out 1975.501 load 496.0937
@@ -295,6 +377,8 @@ DFF_SLOW CK->Q Rise>Rise in 10 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 10 out 30.000 load 5.9814
 DFF_SLOW CK->Q Rise>Rise in 10 out 80.000 load 18.6768
 DFF_SLOW CK->Q Rise>Rise in 10 out 400.000 load 99.6094
+DFF_SLOW CK->Q Rise>Rise in 10 out 500.000 load 125.0000
+DFF_SLOW CK->Q Rise>Rise in 10 out 2000.000 load 503.9063
 DFF_SLOW CK->Q Rise>Rise in 10 out 6.317 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 10 out 3945.711 load 992.1875
 DFF_SLOW CK->Q Rise>Rise in 10 out 1976.014 load 496.0937
@@ -302,6 +386,8 @@ DFF_SLOW CK->Q Rise>Rise in 60 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 60 out 30.000 load 5.3406
 DFF_SLOW CK->Q Rise>Rise in 60 out 80.000 load 17.9443
 DFF_SLOW CK->Q Rise>Rise in 60 out 400.000 load 98.6328
+DFF_SLOW CK->Q Rise>Rise in 60 out 500.000 load 124.0234
+DFF_SLOW CK->Q Rise>Rise in 60 out 2000.000 load 503.9063
 DFF_SLOW CK->Q Rise>Rise in 60 out 8.881 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 60 out 3948.275 load 992.1875
 DFF_SLOW CK->Q Rise>Rise in 60 out 1978.578 load 496.0937
@@ -309,6 +395,8 @@ DFF_SLOW CK->Q Rise>Rise in 200 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 200 out 30.000 load 3.5095
 DFF_SLOW CK->Q Rise>Rise in 200 out 80.000 load 16.1133
 DFF_SLOW CK->Q Rise>Rise in 200 out 400.000 load 97.1680
+DFF_SLOW CK->Q Rise>Rise in 200 out 500.000 load 122.0703
+DFF_SLOW CK->Q Rise>Rise in 200 out 2000.000 load 500.0000
 DFF_SLOW CK->Q Rise>Rise in 200 out 16.061 load 0.0000
 DFF_SLOW CK->Q Rise>Rise in 200 out 3955.455 load 992.1875
 DFF_SLOW CK->Q Rise>Rise in 200 out 1985.758 load 496.0937
@@ -316,6 +404,8 @@ DFF_SLOW CK->Q Rise>Fall in 0 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 0 out 30.000 load 6.1035
 DFF_SLOW CK->Q Rise>Fall in 0 out 80.000 load 18.7988
 DFF_SLOW CK->Q Rise>Fall in 0 out 400.000 load 99.6094
+DFF_SLOW CK->Q Rise>Fall in 0 out 500.000 load 125.0000
+DFF_SLOW CK->Q Rise>Fall in 0 out 2000.000 load 503.9063
 DFF_SLOW CK->Q Rise>Fall in 0 out 5.804 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 0 out 3945.198 load 992.1875
 DFF_SLOW CK->Q Rise>Fall in 0 out 1975.501 load 496.0937
@@ -323,6 +413,8 @@ DFF_SLOW CK->Q Rise>Fall in 10 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 10 out 30.000 load 5.9814
 DFF_SLOW CK->Q Rise>Fall in 10 out 80.000 load 18.6768
 DFF_SLOW CK->Q Rise>Fall in 10 out 400.000 load 99.6094
+DFF_SLOW CK->Q Rise>Fall in 10 out 500.000 load 125.0000
+DFF_SLOW CK->Q Rise>Fall in 10 out 2000.000 load 503.9063
 DFF_SLOW CK->Q Rise>Fall in 10 out 6.317 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 10 out 3945.711 load 992.1875
 DFF_SLOW CK->Q Rise>Fall in 10 out 1976.014 load 496.0937
@@ -330,6 +422,8 @@ DFF_SLOW CK->Q Rise>Fall in 60 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 60 out 30.000 load 5.3406
 DFF_SLOW CK->Q Rise>Fall in 60 out 80.000 load 17.9443
 DFF_SLOW CK->Q Rise>Fall in 60 out 400.000 load 98.6328
+DFF_SLOW CK->Q Rise>Fall in 60 out 500.000 load 124.0234
+DFF_SLOW CK->Q Rise>Fall in 60 out 2000.000 load 503.9063
 DFF_SLOW CK->Q Rise>Fall in 60 out 8.881 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 60 out 3948.275 load 992.1875
 DFF_SLOW CK->Q Rise>Fall in 60 out 1978.578 load 496.0937
@@ -337,6 +431,8 @@ DFF_SLOW CK->Q Rise>Fall in 200 out 5.000 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 200 out 30.000 load 3.5095
 DFF_SLOW CK->Q Rise>Fall in 200 out 80.000 load 16.1133
 DFF_SLOW CK->Q Rise>Fall in 200 out 400.000 load 97.1680
+DFF_SLOW CK->Q Rise>Fall in 200 out 500.000 load 122.0703
+DFF_SLOW CK->Q Rise>Fall in 200 out 2000.000 load 500.0000
 DFF_SLOW CK->Q Rise>Fall in 200 out 16.061 load 0.0000
 DFF_SLOW CK->Q Rise>Fall in 200 out 3955.455 load 992.1875
 DFF_SLOW CK->Q Rise>Fall in 200 out 1985.758 load 496.0937
@@ -345,6 +441,8 @@ DFF_SLOWER CK->Q Rise>Rise in 0 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 0 out 30.000 load 6.1035
 DFF_SLOWER CK->Q Rise>Rise in 0 out 80.000 load 18.7988
 DFF_SLOWER CK->Q Rise>Rise in 0 out 400.000 load 99.6094
+DFF_SLOWER CK->Q Rise>Rise in 0 out 500.000 load 125.0000
+DFF_SLOWER CK->Q Rise>Rise in 0 out 2000.000 load 503.9063
 DFF_SLOWER CK->Q Rise>Rise in 0 out 5.804 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 0 out 3945.198 load 992.1875
 DFF_SLOWER CK->Q Rise>Rise in 0 out 1975.501 load 496.0937
@@ -352,6 +450,8 @@ DFF_SLOWER CK->Q Rise>Rise in 10 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 10 out 30.000 load 5.9814
 DFF_SLOWER CK->Q Rise>Rise in 10 out 80.000 load 18.6768
 DFF_SLOWER CK->Q Rise>Rise in 10 out 400.000 load 99.6094
+DFF_SLOWER CK->Q Rise>Rise in 10 out 500.000 load 125.0000
+DFF_SLOWER CK->Q Rise>Rise in 10 out 2000.000 load 503.9063
 DFF_SLOWER CK->Q Rise>Rise in 10 out 6.317 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 10 out 3945.711 load 992.1875
 DFF_SLOWER CK->Q Rise>Rise in 10 out 1976.014 load 496.0937
@@ -359,6 +459,8 @@ DFF_SLOWER CK->Q Rise>Rise in 60 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 60 out 30.000 load 5.3406
 DFF_SLOWER CK->Q Rise>Rise in 60 out 80.000 load 17.9443
 DFF_SLOWER CK->Q Rise>Rise in 60 out 400.000 load 98.6328
+DFF_SLOWER CK->Q Rise>Rise in 60 out 500.000 load 124.0234
+DFF_SLOWER CK->Q Rise>Rise in 60 out 2000.000 load 503.9063
 DFF_SLOWER CK->Q Rise>Rise in 60 out 8.881 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 60 out 3948.275 load 992.1875
 DFF_SLOWER CK->Q Rise>Rise in 60 out 1978.578 load 496.0937
@@ -366,6 +468,8 @@ DFF_SLOWER CK->Q Rise>Rise in 200 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 200 out 30.000 load 3.5095
 DFF_SLOWER CK->Q Rise>Rise in 200 out 80.000 load 16.1133
 DFF_SLOWER CK->Q Rise>Rise in 200 out 400.000 load 97.1680
+DFF_SLOWER CK->Q Rise>Rise in 200 out 500.000 load 122.0703
+DFF_SLOWER CK->Q Rise>Rise in 200 out 2000.000 load 500.0000
 DFF_SLOWER CK->Q Rise>Rise in 200 out 16.061 load 0.0000
 DFF_SLOWER CK->Q Rise>Rise in 200 out 3955.455 load 992.1875
 DFF_SLOWER CK->Q Rise>Rise in 200 out 1985.758 load 496.0937
@@ -373,6 +477,8 @@ DFF_SLOWER CK->Q Rise>Fall in 0 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 0 out 30.000 load 6.1035
 DFF_SLOWER CK->Q Rise>Fall in 0 out 80.000 load 18.7988
 DFF_SLOWER CK->Q Rise>Fall in 0 out 400.000 load 99.6094
+DFF_SLOWER CK->Q Rise>Fall in 0 out 500.000 load 125.0000
+DFF_SLOWER CK->Q Rise>Fall in 0 out 2000.000 load 503.9063
 DFF_SLOWER CK->Q Rise>Fall in 0 out 5.804 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 0 out 3945.198 load 992.1875
 DFF_SLOWER CK->Q Rise>Fall in 0 out 1975.501 load 496.0937
@@ -380,6 +486,8 @@ DFF_SLOWER CK->Q Rise>Fall in 10 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 10 out 30.000 load 5.9814
 DFF_SLOWER CK->Q Rise>Fall in 10 out 80.000 load 18.6768
 DFF_SLOWER CK->Q Rise>Fall in 10 out 400.000 load 99.6094
+DFF_SLOWER CK->Q Rise>Fall in 10 out 500.000 load 125.0000
+DFF_SLOWER CK->Q Rise>Fall in 10 out 2000.000 load 503.9063
 DFF_SLOWER CK->Q Rise>Fall in 10 out 6.317 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 10 out 3945.711 load 992.1875
 DFF_SLOWER CK->Q Rise>Fall in 10 out 1976.014 load 496.0937
@@ -387,6 +495,8 @@ DFF_SLOWER CK->Q Rise>Fall in 60 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 60 out 30.000 load 5.3406
 DFF_SLOWER CK->Q Rise>Fall in 60 out 80.000 load 17.9443
 DFF_SLOWER CK->Q Rise>Fall in 60 out 400.000 load 98.6328
+DFF_SLOWER CK->Q Rise>Fall in 60 out 500.000 load 124.0234
+DFF_SLOWER CK->Q Rise>Fall in 60 out 2000.000 load 503.9063
 DFF_SLOWER CK->Q Rise>Fall in 60 out 8.881 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 60 out 3948.275 load 992.1875
 DFF_SLOWER CK->Q Rise>Fall in 60 out 1978.578 load 496.0937
@@ -394,6 +504,81 @@ DFF_SLOWER CK->Q Rise>Fall in 200 out 5.000 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 200 out 30.000 load 3.5095
 DFF_SLOWER CK->Q Rise>Fall in 200 out 80.000 load 16.1133
 DFF_SLOWER CK->Q Rise>Fall in 200 out 400.000 load 97.1680
+DFF_SLOWER CK->Q Rise>Fall in 200 out 500.000 load 122.0703
+DFF_SLOWER CK->Q Rise>Fall in 200 out 2000.000 load 500.0000
 DFF_SLOWER CK->Q Rise>Fall in 200 out 16.061 load 0.0000
 DFF_SLOWER CK->Q Rise>Fall in 200 out 3955.455 load 992.1875
 DFF_SLOWER CK->Q Rise>Fall in 200 out 1985.758 load 496.0937
+SLOWSLEW mean 99.6094
+SLOWSLEW A->Z Rise>Rise in 0 out 5.000 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 0 out 30.000 load 50.2930
+SLOWSLEW A->Z Rise>Rise in 0 out 80.000 load 173.8281
+SLOWSLEW A->Z Rise>Rise in 0 out 400.000 load 960.9375
+SLOWSLEW A->Z Rise>Rise in 0 out 500.000 load 1210.9375
+SLOWSLEW A->Z Rise>Rise in 0 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Rise>Rise in 0 out 9.596 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 0 out 413.636 load 992.1875
+SLOWSLEW A->Z Rise>Rise in 0 out 211.616 load 496.0937
+SLOWSLEW A->Z Rise>Rise in 10 out 5.000 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 10 out 30.000 load 50.2930
+SLOWSLEW A->Z Rise>Rise in 10 out 80.000 load 173.8281
+SLOWSLEW A->Z Rise>Rise in 10 out 400.000 load 960.9375
+SLOWSLEW A->Z Rise>Rise in 10 out 500.000 load 1210.9375
+SLOWSLEW A->Z Rise>Rise in 10 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Rise>Rise in 10 out 9.596 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 10 out 413.636 load 992.1875
+SLOWSLEW A->Z Rise>Rise in 10 out 211.616 load 496.0937
+SLOWSLEW A->Z Rise>Rise in 60 out 5.000 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 60 out 30.000 load 50.2930
+SLOWSLEW A->Z Rise>Rise in 60 out 80.000 load 173.8281
+SLOWSLEW A->Z Rise>Rise in 60 out 400.000 load 960.9375
+SLOWSLEW A->Z Rise>Rise in 60 out 500.000 load 1210.9375
+SLOWSLEW A->Z Rise>Rise in 60 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Rise>Rise in 60 out 9.596 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 60 out 413.636 load 992.1875
+SLOWSLEW A->Z Rise>Rise in 60 out 211.616 load 496.0937
+SLOWSLEW A->Z Rise>Rise in 200 out 5.000 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 200 out 30.000 load 50.2930
+SLOWSLEW A->Z Rise>Rise in 200 out 80.000 load 173.8281
+SLOWSLEW A->Z Rise>Rise in 200 out 400.000 load 960.9375
+SLOWSLEW A->Z Rise>Rise in 200 out 500.000 load 1210.9375
+SLOWSLEW A->Z Rise>Rise in 200 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Rise>Rise in 200 out 9.596 load 0.0000
+SLOWSLEW A->Z Rise>Rise in 200 out 413.636 load 992.1875
+SLOWSLEW A->Z Rise>Rise in 200 out 211.616 load 496.0937
+SLOWSLEW A->Z Fall>Fall in 0 out 5.000 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 0 out 30.000 load 50.2930
+SLOWSLEW A->Z Fall>Fall in 0 out 80.000 load 173.8281
+SLOWSLEW A->Z Fall>Fall in 0 out 400.000 load 960.9375
+SLOWSLEW A->Z Fall>Fall in 0 out 500.000 load 1210.9375
+SLOWSLEW A->Z Fall>Fall in 0 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Fall>Fall in 0 out 9.596 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 0 out 413.636 load 992.1875
+SLOWSLEW A->Z Fall>Fall in 0 out 211.616 load 496.0937
+SLOWSLEW A->Z Fall>Fall in 10 out 5.000 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 10 out 30.000 load 50.2930
+SLOWSLEW A->Z Fall>Fall in 10 out 80.000 load 173.8281
+SLOWSLEW A->Z Fall>Fall in 10 out 400.000 load 960.9375
+SLOWSLEW A->Z Fall>Fall in 10 out 500.000 load 1210.9375
+SLOWSLEW A->Z Fall>Fall in 10 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Fall>Fall in 10 out 9.596 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 10 out 413.636 load 992.1875
+SLOWSLEW A->Z Fall>Fall in 10 out 211.616 load 496.0937
+SLOWSLEW A->Z Fall>Fall in 60 out 5.000 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 60 out 30.000 load 50.2930
+SLOWSLEW A->Z Fall>Fall in 60 out 80.000 load 173.8281
+SLOWSLEW A->Z Fall>Fall in 60 out 400.000 load 960.9375
+SLOWSLEW A->Z Fall>Fall in 60 out 500.000 load 1210.9375
+SLOWSLEW A->Z Fall>Fall in 60 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Fall>Fall in 60 out 9.596 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 60 out 413.636 load 992.1875
+SLOWSLEW A->Z Fall>Fall in 60 out 211.616 load 496.0937
+SLOWSLEW A->Z Fall>Fall in 200 out 5.000 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 200 out 30.000 load 50.2930
+SLOWSLEW A->Z Fall>Fall in 200 out 80.000 load 173.8281
+SLOWSLEW A->Z Fall>Fall in 200 out 400.000 load 960.9375
+SLOWSLEW A->Z Fall>Fall in 200 out 500.000 load 1210.9375
+SLOWSLEW A->Z Fall>Fall in 200 out 2000.000 load 4906.2500
+SLOWSLEW A->Z Fall>Fall in 200 out 9.596 load 0.0000
+SLOWSLEW A->Z Fall>Fall in 200 out 413.636 load 992.1875
+SLOWSLEW A->Z Fall>Fall in 200 out 211.616 load 496.0937

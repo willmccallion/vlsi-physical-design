@@ -1516,6 +1516,16 @@ fn a_check_on_a_buffers_input_does_not_move_the_target_slews() {
     assert_eq!(slews(&checked), slews(&plain));
 }
 
+/// A buffer whose slew hardly climbs with its load.
+const SLOWSLEW_CELL: &str = "cell (SLOWSLEW) { area : 0.8 ;
+        pin (A) { direction : input ; capacitance : 0.97 ; }
+        pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 6000.0 ;
+          timing () { related_pin : \"A\" ; timing_sense : positive_unate ;
+            cell_rise (delay_t) { values (\"0.1, 1.0\", \"0.1, 1.0\") ; }
+            cell_fall (delay_t) { values (\"0.1, 1.0\", \"0.1, 1.0\") ; }
+            rise_transition (delay_t) { values (\"0.01, 0.05\", \"0.01, 0.05\") ; }
+            fall_transition (delay_t) { values (\"0.01, 0.05\", \"0.01, 0.05\") ; } } } }";
+
 /// Seconds in picoseconds to a thousandth of one.
 fn ps(time: Seconds) -> String {
     format!(
@@ -1531,7 +1541,7 @@ fn ff(load: Farads) -> String {
 
 #[test]
 fn the_load_that_gives_a_target_slew_over_every_arc_and_slew_of_the_clock_cells_is_as_found() {
-    let lib = cells(&clock_cells_source());
+    let lib = cells_with(SLOWSLEW_CELL);
     let mut lines = String::new();
     for (id, cell) in lib.cells.iter_enumerated() {
         let _ = writeln!(
@@ -1557,6 +1567,8 @@ fn the_load_that_gives_a_target_slew_over_every_arc_and_slew_of_the_clock_cells_
                         Seconds::new(30e-12),
                         Seconds::new(80e-12),
                         Seconds::new(400e-12),
+                        Seconds::new(500e-12),
+                        Seconds::new(2000e-12),
                         exact(0.0),
                         exact(1e-12),
                         exact(5e-13),
