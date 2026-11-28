@@ -1,0 +1,22 @@
+crates/resizer/src/repair.rs:475:42: replace * with / in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:479:35: replace > with < in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:479:35: replace > with == in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:479:35: replace > with >= in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:479:72: replace < with <= in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:479:72: replace < with == in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:479:72: replace < with > in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:481:22: replace < with <= in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:481:22: replace < with == in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:481:22: replace < with > in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:483:22: replace *= with += in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:483:22: replace *= with /= in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:488:26: replace < with <= in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:488:26: replace < with == in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:488:26: replace < with > in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:583:33: replace + with - in Repairer<'r, 'a, T>::repair_junction
+crates/resizer/src/resizer.rs:1656:31: replace > with >= in arc_target_load
+crates/resizer/src/resizer.rs:1656:68: replace < with <= in arc_target_load
+crates/resizer/src/resizer.rs:1657:20: replace += with *= in arc_target_load
+crates/resizer/src/resizer.rs:1657:20: replace += with -= in arc_target_load
+crates/resizer/src/resizer.rs:1660:18: replace *= with += in arc_target_load
+crates/resizer/src/resizer.rs:1660:18: replace *= with /= in arc_target_load
