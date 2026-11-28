@@ -340,3 +340,196 @@ fn equivalent_cells_run_from_weakest_drive_and_ties_keep_library_order() {
     assert_eq!(classes.len(), 1);
     assert_eq!(names, ["B", "C", "D", "A"]);
 }
+
+/// A design of no instances with copies of `BUF_X1` named `copies`.
+fn empty_design_with(copies: &[&str]) -> NetlistDB {
+    let copies: Vec<(&str, &str)> = copies.iter().map(|&n| ("BUF_X1", n)).collect();
+    design_with_copies(
+        &def_text(
+            "empty",
+            &DefSections {
+                components: "",
+                nets: "",
+                inputs: &[],
+                outputs: &[],
+            },
+        ),
+        &copies,
+    )
+}
+
+#[test]
+fn a_liberty_cell_without_a_master_is_not_a_link_cell() {
+    let db = empty_design_with(&["B0"]);
+    let lib = cells_with(&(buffer_cell("B0", "buf", 0.1) + &buffer_cell("LONELY_X1", "buf", 0.1)));
+    let link = Link::new(&db, &lib, &[]).unwrap();
+
+    assert!(link.is_link_cell(lib.cell_id("B0").unwrap()));
+    assert!(!link.is_link_cell(lib.cell_id("LONELY_X1").unwrap()));
+}
+
+#[test]
+fn a_cell_without_a_master_is_not_offered_as_a_size() {
+    let db = empty_design_with(&["B0"]);
+    let lib = cells_with(&(buffer_cell("B0", "buf", 0.1) + &buffer_cell("LONELY_X1", "buf", 0.1)));
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let b0 = lib.cell_id("B0").unwrap();
+    let lonely = lib.cell_id("LONELY_X1").unwrap();
+    assert_eq!(link.class_of[b0], link.class_of[lonely]);
+
+    let sizes = link.swappable_cells(b0, SizingLimits::NONE);
+
+    assert!(sizes.contains(&b0));
+    assert!(!sizes.contains(&lonely));
+}
+
+#[test]
+fn a_buffers_input_capacitance_is_its_input_ports() {
+    let (db, lib) = attributed_buffers(&[""]);
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let buffer = lib.buffer_cell(lib.cell_id("B0").unwrap()).unwrap();
+
+    assert_eq!(link.buffer_input_capacitance(buffer), Farads::new(1.0e-15));
+}
+
+#[test]
+fn the_most_used_sites_come_first_and_only_two_are_kept() {
+    let site = |i: usize| Some(SiteId::new(i));
+    let used = [site(0), site(1), site(1), site(2), site(2), site(2), None];
+
+    assert_eq!(most_used_sites(used.into_iter()), [site(2), site(1)]);
+    assert_eq!(most_used_sites(std::iter::empty()), []);
+}
+
+#[test]
+fn buffers_split_into_five_bands_whose_sizes_differ_by_at_most_one() {
+    let names: Vec<String> = (0..15).map(|i| format!("C{i}")).collect();
+    let slews: Vec<(&str, f64)> = names.iter().map(|n| (n.as_str(), 0.1)).collect();
+    let lib = buffers(&slews);
+    let all: Vec<BufferCell> = lib
+        .cells
+        .ids()
+        .map(|id| lib.buffer_cell(id).unwrap())
+        .collect();
+
+    for (count, expected) in [
+        (15, [3, 3, 3, 3, 3]),
+        (7, [2, 2, 1, 1, 1]),
+        (3, [1, 1, 1, 0, 0]),
+        (0, [0, 0, 0, 0, 0]),
+    ] {
+        let bands: Vec<&[BufferCell]> = drive_bands(&all[..count]).collect();
+        let sizes: Vec<usize> = bands.iter().map(|b| b.len()).collect();
+        assert_eq!(sizes, expected, "{count} buffers");
+        assert_eq!(bands.concat(), all[..count], "{count} buffers");
+    }
+}
+
+#[test]
+fn clock_cell_candidates_are_the_cells_that_may_be_used_and_are_not_power_cells() {
+    let (db, lib) = attributed_buffers(&["", "", "is_level_shifter : true ;"]);
+    let link = Link::new(&db, &lib, &["B1".to_string()]).unwrap();
+    let candidate = |name: &str| link.is_clock_cell_candidate(lib.cell_id(name).unwrap());
+
+    assert!(candidate("B0"));
+    assert!(!candidate("B1"));
+    assert!(!candidate("B2"));
+}
+
+/// The names `infer_clock_buffers` chooses of `lib` in `db` with the cells
+/// `dont_use` not to be used.
+fn inferred_clock_buffers(db: &NetlistDB, lib: &Liberty, dont_use: &[&str]) -> Vec<String> {
+    let dont_use: Vec<String> = dont_use.iter().map(|n| (*n).to_string()).collect();
+    let link = Link::new(db, lib, &dont_use).unwrap();
+    link.infer_clock_buffers(db)
+        .iter()
+        .map(|b| lib.cell(b.id).name.clone())
+        .collect()
+}
+
+const INVERTER: &str = "cell (INVBUF_X1) { area : 0.53 ; \
+    pin (A) { direction : input ; capacitance : 1.6 ; } \
+    pin (ZN) { direction : output ; function : \"!A\" ; } }\n";
+
+#[test]
+fn clock_buffers_are_found_by_name_among_buffers_that_may_be_used_with_a_master() {
+    let db = design_with_copies(
+        &def_text(
+            "named",
+            &DefSections {
+                components: "",
+                nets: "",
+                inputs: &[],
+                outputs: &[],
+            },
+        ),
+        &[("INV_X1", "INVBUF_X1")],
+    );
+    let lib = cells_with(&(INVERTER.to_string() + &buffer_cell("LONELYBUF_X1", "buf", 0.1)));
+
+    let chosen = inferred_clock_buffers(&db, &lib, &["CLKBUF_X3"]);
+
+    assert_eq!(chosen, ["BUF_X1"]);
+}
+
+/// The design of `BUF_X1` copies `name`, whose pin `pin` has `signal_use`
+/// and `direction`.
+fn buffer_with_pin_use(
+    name: &str,
+    pin: &str,
+    direction: PinDirection,
+    signal_use: SignalUse,
+) -> (NetlistDB, Liberty) {
+    let mut db = empty_design_with(&[name]);
+    let id = db.library.macro_id(name).unwrap();
+    let macro_pin = db.library.macros[id]
+        .pins
+        .iter_mut()
+        .find(|p| p.name == pin)
+        .unwrap();
+    macro_pin.direction = direction;
+    macro_pin.signal_use = signal_use;
+    (db, cells_with(&buffer_cell(name, "buf", 0.1)))
+}
+
+#[test]
+fn a_buffer_with_a_clock_input_pin_is_a_clock_buffer() {
+    let (db, lib) = buffer_with_pin_use("TREE_X1", "A", PinDirection::Input, SignalUse::Clock);
+
+    let chosen = inferred_clock_buffers(&db, &lib, &["CLKBUF_X3"]);
+
+    assert_eq!(chosen, ["TREE_X1"]);
+}
+
+#[test]
+fn a_buffer_with_a_clock_output_pin_is_not_a_clock_buffer_for_that() {
+    let (db, lib) = buffer_with_pin_use("TREE_X1", "Z", PinDirection::Output, SignalUse::Clock);
+
+    let chosen = inferred_clock_buffers(&db, &lib, &["CLKBUF_X3"]);
+
+    assert_eq!(chosen, ["BUF_X1"]);
+}
+
+#[test]
+fn only_a_plain_core_cell_is_a_logic_std_cell() {
+    let mut db = design_with_copies(
+        &def_text(
+            "one",
+            &DefSections {
+                components: "- i BUF_X1 + PLACED ( 2000 2800 ) N ;\n",
+                nets: "",
+                inputs: &[],
+                outputs: &[],
+            },
+        ),
+        &[],
+    );
+    let instance = db.cell_id("i").unwrap();
+    let master = db.library.macro_id("BUF_X1").unwrap();
+    assert!(is_logic_std_cell(&db, instance));
+
+    for class in [MacroClass::Block, MacroClass::Core(CoreKind::Spacer)] {
+        db.library.macros[master].class = class;
+        assert!(!is_logic_std_cell(&db, instance), "{class:?}");
+    }
+}
