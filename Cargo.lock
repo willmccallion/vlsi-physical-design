@@ -705,6 +705,7 @@ dependencies = [
  "log",
  "pare-common",
  "pare-resizer",
+ "proptest",
  "rustc-hash",
  "thiserror",
 ]
@@ -716,6 +717,7 @@ dependencies = [
  "log",
  "pare-common",
  "pare-verify",
+ "proptest",
  "rand 0.8.5",
  "rayon",
  "rustfft",
@@ -740,6 +742,7 @@ dependencies = [
  "log",
  "pare-common",
  "pare-verify",
+ "proptest",
  "rayon",
  "rustc-hash",
  "thiserror",
