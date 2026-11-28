@@ -127,7 +127,7 @@ const LEVEL_CELLS: &str = "\
       pin (Z) { direction : output ; clock_gate_out_pin : true ; } }";
 
 /// Tie cells `hi` and `lo`, tristate buffers `tb1` to `tb5` and clock
-/// gates `icg1` and `icg2`, wired as the test cases of `levels` read.
+/// gates `icg1` to `icg3`, wired as the test cases of `levels` read.
 fn levels() -> (NetlistDB, Liberty) {
     let db = design_with_copies(
         &def_text(
@@ -141,15 +141,16 @@ fn levels() -> (NetlistDB, Liberty) {
                              - tb4 TBUF + PLACED ( 12000 2800 ) N ;\n\
                              - tb5 TBUF + PLACED ( 14000 2800 ) N ;\n\
                              - icg1 ICG + PLACED ( 16000 2800 ) N ;\n\
-                             - icg2 ICG + PLACED ( 18000 2800 ) N ;\n",
-                nets: "- h ( hi ZN ) ( tb1 A ) ( tb1 B ) ( tb2 A ) ( tb3 A ) ( tb5 B ) ;\n\
+                             - icg2 ICG + PLACED ( 18000 2800 ) N ;\n\
+                             - icg3 ICG + PLACED ( 22000 2800 ) N ;\n",
+                nets: "- h ( hi ZN ) ( tb1 A ) ( tb1 B ) ( tb2 A ) ( tb3 A ) ( tb5 B ) ( icg3 B ) ;\n\
                        - l ( lo ZN ) ( tb3 B ) ( tb4 B ) ( icg1 B ) ;\n\
                        - d ( PIN d ) ( tb4 A ) ( tb5 A ) ;\n\
                        - en ( PIN en ) ( tb2 B ) ( icg2 B ) ;\n\
-                       - clk ( PIN clk ) ( icg1 A ) ( icg2 A ) ;\n\
+                       - clk ( PIN clk ) ( icg1 A ) ( icg2 A ) ( icg3 A ) ;\n\
                        - z1 ( tb1 Z ) ;\n- z2 ( tb2 Z ) ;\n- z3 ( tb3 Z ) ;\n\
                        - z4 ( tb4 Z ) ;\n- z5 ( tb5 Z ) ;\n\
-                       - g1 ( icg1 Z ) ;\n- g2 ( icg2 Z ) ;\n",
+                       - g1 ( icg1 Z ) ;\n- g2 ( icg2 Z ) ;\n- g3 ( icg3 Z ) ;\n",
                 inputs: &["d", "en", "clk"],
                 outputs: &[],
             },
@@ -198,6 +199,8 @@ fn a_clock_gate_output_is_low_while_its_enable_is_low_and_unknown_otherwise() {
 
     assert_eq!(constants.level(pin(&db, "icg1/Z")), Logic::Zero);
     assert_eq!(constants.level(pin(&db, "icg2/Z")), Logic::Unknown);
+    // Its enable is known high but its clock is not.
+    assert_eq!(constants.level(pin(&db, "icg3/Z")), Logic::Unknown);
 }
 
 #[test]
