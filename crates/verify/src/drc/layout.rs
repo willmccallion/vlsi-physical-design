@@ -185,7 +185,7 @@ impl Layout {
     /// Adds a rectangle; one on a layer the layout does not have, or
     /// without area, is ignored.
     pub fn add(&mut self, layer: LayerRef, owner: OwnerIndex, rect: Rect<Dbu>, origin: Origin) {
-        if rect.width() < Dbu::ZERO || rect.height() < Dbu::ZERO {
+        if rect.width() <= Dbu::ZERO || rect.height() <= Dbu::ZERO {
             return;
         }
         self.add_shape(
