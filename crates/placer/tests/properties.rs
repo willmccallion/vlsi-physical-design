@@ -1,14 +1,20 @@
 //! What the placer keeps, whatever the placement it starts from: each
 //! legalizer leaves no cell overlapping another, off its row or off the site
 //! grid, by the independent checker of the verify crate, and moves no fixed
-//! block.
+//! block; and the improvers keep a legal placement legal without
+//! lengthening its wire.
 
 #![allow(clippy::unwrap_used)]
 
 use pare_common::db::design::NetlistDB;
+use pare_common::geom::dbu::Dbu;
+use pare_common::geom::orient::Orientation;
+use pare_common::geom::point::Point;
 use pare_common::testing::designs;
 use pare_placer::legalize::abacus;
 use pare_placer::legalize::opendp::detailed_placement;
+use pare_placer::legalize::opendp::improve::{MaxDisplacement, improve_placement};
+use pare_placer::legalize::opendp::mirror::{hpwl, optimize_mirroring};
 use pare_placer::zones::Zones;
 use pare_verify::placement::placement_violations;
 use proptest::prelude::*;
@@ -53,6 +59,18 @@ fn placement() -> impl Strategy<Value = Placement> {
     (starts, blocks).prop_map(|(starts, blocks)| Placement { starts, blocks })
 }
 
+/// The design of `placement`, made legal by `OpenDP`'s detailed placement.
+fn legal(placement: &Placement) -> NetlistDB {
+    let mut db = placement.design();
+    let _ = detailed_placement(&mut db).unwrap();
+    db
+}
+
+/// Each cell's lower-left corner and orientation.
+fn spots(db: &NetlistDB) -> Vec<(Point<Dbu>, Orientation)> {
+    db.cells.iter().map(|c| (c.location, c.orient)).collect()
+}
+
 fn assert_blocks_stay(db: &NetlistDB, blocks: &[(i64, i64)]) -> Result<(), TestCaseError> {
     for (b, &(x, y)) in blocks.iter().enumerate() {
         let block = &db.cells[db.cell_id(&format!("ram{b}")).unwrap()];
@@ -77,8 +95,7 @@ proptest! {
     fn legalizing_any_placement_leaves_it_legal_and_its_blocks_where_they_were(
         placement in placement(),
     ) {
-        let mut db = placement.design();
-        let _ = detailed_placement(&mut db).unwrap();
+        let db = legal(&placement);
 
         prop_assert_eq!(placement_violations(&db), Vec::new());
         assert_blocks_stay(&db, &placement.blocks)?;
@@ -95,5 +112,39 @@ proptest! {
 
         prop_assert_eq!(placement_violations(&db), Vec::new());
         assert_blocks_stay(&db, &placement.blocks)?;
+    }
+}
+
+proptest! {
+    #![proptest_config(config(24, 53))]
+
+    #[test]
+    fn improving_a_legal_placement_keeps_it_legal_and_never_lengthens_it(
+        placement in placement(),
+    ) {
+        let mut db = legal(&placement);
+        let unlimited = MaxDisplacement { x: None, y: None };
+
+        let improvement = improve_placement(&mut db, unlimited).unwrap();
+
+        prop_assert_eq!(placement_violations(&db), Vec::new());
+        assert_blocks_stay(&db, &placement.blocks)?;
+        prop_assert!(improvement.hpwl_after <= improvement.hpwl_before, "{improvement:?}");
+    }
+
+    #[test]
+    fn mirroring_a_legal_placement_moves_no_cell_and_never_lengthens_it(
+        placement in placement(),
+    ) {
+        let mut db = legal(&placement);
+        let (before, hpwl_before) = (spots(&db), hpwl(&db));
+
+        let _ = optimize_mirroring(&mut db);
+
+        prop_assert_eq!(placement_violations(&db), Vec::new());
+        for (cell, (at, _)) in db.cells.iter().zip(before) {
+            prop_assert_eq!(cell.location, at, "{} moved", cell.name);
+        }
+        prop_assert!(hpwl(&db) <= hpwl_before, "{:?} after {:?}", hpwl(&db), hpwl_before);
     }
 }
