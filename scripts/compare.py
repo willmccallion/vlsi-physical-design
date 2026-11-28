@@ -28,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -38,6 +39,9 @@ ORFS = ROOT / "inputs/orfs/OpenROAD-flow-scripts-26Q2/flow"
 PLATFORM = ORFS / "platforms/nangate45"
 PARE = ROOT / "target/release/pare"
 EDA_SHELL = ["nix", "develop", ".#eda", "-c"]
+# GNU time, which reports each run's wall time and peak memory; it is
+# wherever the PATH finds it, which on NixOS is not /usr/bin/time.
+GNU_TIME = shutil.which("time")
 EDA_TOOLS = ("openroad", "make")
 SIDES = ("pare", "openroad")
 MODES = ("route", "flow")
@@ -139,10 +143,10 @@ def routed_def(out, side):
 
 
 def run(cmd, log, env=None):
-    """Runs `cmd` under /usr/bin/time -v with its output in `log`, in the eda
+    """Runs `cmd` under GNU time -v with its output in `log`, in the eda
     shell when it is one of that shell's tools, with the variables of `env`
     set, or unset where the value is None."""
-    full = ["/usr/bin/time", "-v", *cmd]
+    full = [GNU_TIME, "-v", *cmd]
     if cmd[0] in EDA_TOOLS:
         full = [*EDA_SHELL, *full]
     environment = {**os.environ, **(env or {})}
@@ -350,7 +354,7 @@ def compare(mode, design, skip_openroad=False):
 
 
 def time_and_memory(log):
-    """The wall time and peak memory /usr/bin/time -v wrote at the end of `log`."""
+    """The wall time and peak memory GNU time -v wrote at the end of `log`."""
     text = log.read_text(errors="replace") if log.exists() else ""
     wall = re.search(r"Elapsed \(wall clock\) time .*: (\S+)", text)
     rss = re.search(r"Maximum resident set size \(kbytes\): (\d+)", text)
@@ -359,7 +363,7 @@ def time_and_memory(log):
 
 def orfs_time_and_memory(design):
     """The wall time of the flow's stages from the floorplan to the routed
-    design added up, written as /usr/bin/time writes it, and the largest peak
+    design added up, written as GNU time writes it, and the largest peak
     memory among them."""
     seconds = 0.0
     peak_kb = 0
@@ -533,6 +537,8 @@ def main():
             sys.exit(
                 f"{PARE.relative_to(ROOT)} is missing: cargo build --release first"
             )
+        if GNU_TIME is None:
+            sys.exit("GNU time is not on the PATH: install the time package")
         for design in args.designs:
             compare(mode, design, args.skip_openroad)
     results = [result(mode, d, side) for d in args.designs for side in SIDES]

@@ -26,6 +26,7 @@ The exit status is nonzero when any window has markers left.
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -34,6 +35,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PARE = ROOT / "target" / "release" / "pare"
+# GNU time, which reports each run's wall time and peak memory; it is
+# wherever the PATH finds it, which on NixOS is not /usr/bin/time.
+GNU_TIME = shutil.which("time")
 WINDOWS = ROOT / "scripts" / "windows.txt"
 OUT = ROOT / "output" / "windows"
 OPENROAD = ["nix", "develop", ".#eda", "-c", "openroad", "-no_init", "-no_splash", "-exit"]
@@ -124,7 +128,7 @@ def run(name, design, box, mode, placed, rounds, openroad, replace, guides=None)
         to_route = d / "placed.def"
     with open(d / "route.log", "w") as log:
         proc = subprocess.run(
-            ["/usr/bin/time", "-v", str(PARE), "route", str(d / "window.toml"), "--placement", str(to_route)],
+            [GNU_TIME, "-v", str(PARE), "route", str(d / "window.toml"), "--placement", str(to_route)],
             stdout=log, stderr=subprocess.STDOUT, env=env, cwd=ROOT,
         )
     route_s = time.time() - start
@@ -159,6 +163,8 @@ def main():
     args = parser.parse_args()
     if not PARE.exists():
         sys.exit("build first: cargo build --release")
+    if GNU_TIME is None:
+        sys.exit("GNU time is not on the PATH: install the time package")
     failed = 0
     print(f"{'window':14s} {'pare':>6s} {'openroad':>8s} {'gr':>6s} {'unresv':>6s} {'s':>6s} {'MB':>6s}  cropped")
     for name, design, box, mode in read_windows(args.names):
