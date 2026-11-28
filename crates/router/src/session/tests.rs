@@ -1,8 +1,12 @@
 use super::*;
+use crate::Tracks;
 use crate::tests::fixture;
 use pare_common::config::RoutingConfig;
 use pare_common::db::design::{NonDefaultLayer, NonDefaultRule, PlacementStatus};
 use pare_common::db::parser::{def, lef};
+use pare_common::testing::designs;
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngSeed};
 use std::path::Path;
 
 const fn cell(layer: u8, x: u16, y: u16) -> GCell {
@@ -201,4 +205,35 @@ fn a_run_breaks_where_a_branch_joins_it_turns_or_climbs() {
             ((3, 1, 1), (3, 1, 2)),
         ]
     );
+}
+
+proptest! {
+    #![proptest_config(Config {
+        cases: 16,
+        rng_seed: RngSeed::Fixed(61),
+        failure_persistence: None,
+        ..Config::default()
+    })]
+
+    #[test]
+    fn the_grids_usage_is_the_demand_of_the_routes_it_holds(
+        design in designs::inverter_networks(),
+    ) {
+        let db = designs::parse(&design.def_text());
+        let config = RoutingConfig::default();
+        let mut session = GlobalSession::new(&db, &RouteSetup::from(&config), &mut |_| {}).unwrap();
+        let usage = session.grid.usage_by_edge();
+
+        let trees: Vec<NetTree> = std::mem::take(&mut session.routes.trees)
+            .into_values()
+            .map(|placed| session.grid.lift(placed))
+            .collect();
+
+        prop_assert!(usage.iter().any(|&u| u > Tracks::ZERO));
+        prop_assert!(session.grid.usage_by_edge().iter().all(|&u| u == Tracks::ZERO));
+        for tree in trees {
+            let _ = session.grid.place(tree);
+        }
+        prop_assert_eq!(session.grid.usage_by_edge(), usage);
+    }
 }
