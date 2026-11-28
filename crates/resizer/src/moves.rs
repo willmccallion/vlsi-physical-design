@@ -1200,7 +1200,7 @@ fn stitch(
 ) -> Option<BnetPtr> {
     let rc = resizer.tree_rc();
     match &outer.kind {
-        Kind::Load { pin } if *pin == at_load => Some(join_at_load(outer, inner, &rc)),
+        Kind::Load { pin } if *pin == at_load => Some(join_at_load(outer.at, inner, &rc)),
         Kind::Load { .. } => None,
         Kind::Wire { to, layer } => {
             let to = stitch(resizer, to, at_load, inner)?;
@@ -1228,32 +1228,17 @@ fn stitch(
     }
 }
 
-/// `inner` hung where the load `outer` was: as it is at the same point and
-/// layer, by a wire on the load's layer, or through vias and a wire from
-/// the layer `inner` starts on; as it is when either layer is unknown.
-fn join_at_load(outer: &BnetPtr, inner: &BnetPtr, rc: &bnet::TreeRc<'_>) -> BnetPtr {
-    let (in_layer, out_layer) = (outer.layer(), inner.layer());
-    if in_layer == out_layer {
-        return if outer.at == inner.at {
-            Rc::clone(inner)
-        } else {
-            Bnet::wire(outer.at, Rc::clone(inner), in_layer, rc)
-        };
-    }
-    let (Some(in_layer), Some(out_layer)) = (in_layer, out_layer) else {
+/// `inner` hung where a load at `load_at` was: as it is at that point, by
+/// a wire there when it starts elsewhere; as it is when it starts on a
+/// layer.
+// NOTE: stitchTrees also chains vias up from the inner tree's layer to the
+// load's, but a load node carries no layer, so OpenROAD takes its
+// "layer assignment is incomplete" return there; PARE keeps the cases it reaches.
+fn join_at_load(load_at: Point<Dbu>, inner: &BnetPtr, rc: &bnet::TreeRc<'_>) -> BnetPtr {
+    if inner.layer().is_some() || inner.at == load_at {
         return Rc::clone(inner);
-    };
-    let mut joined = Rc::clone(inner);
-    let mut layer = out_layer;
-    while layer != in_layer {
-        let next = layer.toward(in_layer);
-        joined = Bnet::via(inner.at, layer, next, joined, rc);
-        layer = next;
     }
-    if outer.at != inner.at {
-        joined = Bnet::wire(outer.at, joined, Some(in_layer), rc);
-    }
-    joined
+    Bnet::wire(load_at, Rc::clone(inner), None, rc)
 }
 
 /// The slew at each load of a tree from the driver's slew, degraded along
