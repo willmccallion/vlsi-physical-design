@@ -1,5 +1,5 @@
 use super::*;
-use crate::bnet::{Kind, PinLoad};
+use crate::bnet::{Kind, PinLoad, SlackEdges};
 use crate::library::{BufferSet, Link};
 use crate::parasitics::WireRc;
 use crate::resizer::GlobalRouting;
@@ -1329,4 +1329,701 @@ fn rebuffering_seeded_nets_gives_the_buffers_it_did() {
         "c_rebuffered_nets.txt",
         &text,
     );
+}
+
+/// A load-like node of `cap_ff` femtofarads, `slack` femtoseconds, `area`
+/// and `edges` for the slack, at the origin.
+fn option_node(cap_ff: f64, slack: i64, area: f64, edges: Option<SlackEdges>) -> BnetPtr {
+    let load = raw_load(PinId::new(0), cap_ff, slack);
+    Rc::new(Bnet {
+        kind: load.kind.clone(),
+        area: CellArea::new(area),
+        slack_edges: edges,
+        ..*load
+    })
+}
+
+/// Runs `test` with a search whose only buffer has `size_of` the first
+/// buffer's size, driver `f1/Q` set.
+fn with_sized_search(
+    size_of: impl FnOnce(BufferSize) -> BufferSize,
+    test: impl FnOnce(&Resizer<'_, Sta>, &mut Rebuffer, &BufferSize),
+) {
+    let mut db = buffer_between_flops("PLACED");
+    let q = pin(&db, "f1/Q");
+    with_wired_session(&mut db, &cells(&clock_cells_source()), CLOCK, |resizer| {
+        let mut rebuffer = Rebuffer::new(resizer).unwrap();
+        let size = size_of(rebuffer.sizes[0]);
+        rebuffer.sizes = vec![size];
+        assert!(rebuffer.set_driver(resizer, q));
+        test(resizer, &mut rebuffer, &size);
+    });
+}
+
+/// A buffer of 2 fF input, 5 fF output, 1 square micron, no intrinsic
+/// delay and a 50 fF load limit, which can drive what is light.
+fn plain_size(base: BufferSize) -> BufferSize {
+    BufferSize {
+        input_cap: Farads::new(2e-15),
+        output_cap: Farads::new(5e-15),
+        area: CellArea::new(1.0),
+        intrinsic_delay: Fixed::ZERO,
+        margined_max_cap: Farads::new(50e-15),
+        drive_resistance: Ohms::new(100.0),
+        input_max_slew: Seconds::INFINITY,
+        ..base
+    }
+}
+
+#[test]
+fn a_timing_frontier_keeps_only_options_with_more_slack_than_those_kept() {
+    with_sized_search(plain_size, |resizer, _, size| {
+        let mut frontier = Frontier::new(None, 4);
+
+        for slack in [100, 100, 50, 150] {
+            frontier.offer(
+                resizer,
+                size,
+                &option_node(10.0, slack, 0.0, None),
+                Dbu::ZERO,
+            );
+        }
+
+        let kept: Vec<Fixed> = frontier.kept.iter().map(|o| o.slack).collect();
+        assert_eq!(kept, [fs(100), fs(150)]);
+        assert_eq!(frontier.best_slack, fs(150));
+    });
+}
+
+#[test]
+fn an_area_frontier_keeps_only_options_with_less_area_and_enough_slack() {
+    with_sized_search(plain_size, |resizer, _, size| {
+        let exemplar = option_node(10.0, 500, 0.0, None);
+        let offer_all = |options: &[(f64, i64)]| {
+            let mut frontier = Frontier::new(Some((fs(100), &exemplar)), 4);
+            for &(area, slack) in options {
+                frontier.offer(
+                    resizer,
+                    size,
+                    &option_node(10.0, slack, area, None),
+                    Dbu::ZERO,
+                );
+            }
+            frontier
+                .kept
+                .iter()
+                .map(|o| o.area.get())
+                .collect::<Vec<f64>>()
+        };
+
+        // Enough slack and less area than any kept: kept. The same area
+        // again, or more, or too little slack, not.
+        assert_eq!(offer_all(&[(3.0, 200), (3.0, 200), (5.0, 200)]), [3.0]);
+        assert_eq!(offer_all(&[(3.0, 50), (2.0, 200)]), [2.0]);
+        assert_eq!(offer_all(&[(3.0, 200), (2.0, 50), (1.0, 100)]), [3.0, 1.0]);
+    });
+}
+
+#[test]
+fn a_buffer_is_put_on_the_option_that_it_buffers_best_and_can_drive() {
+    with_sized_search(plain_size, |resizer, _, size| {
+        let sized = BufferSize {
+            intrinsic_delay: fs(10),
+            ..*size
+        };
+        let options = [
+            option_node(10.0, 112, 0.0, None),
+            option_node(10.0, 120, 0.0, None),
+        ];
+        let mut frontier = Frontier::new(None, 4);
+        frontier.best_slack = fs(105);
+
+        // The first has 102 left once the intrinsic delay is taken off,
+        // too little against 105; the buffer delays nothing without edges
+        // to time.
+        let best = frontier.best_buffered(resizer, &sized, &options);
+
+        let (option, delay) = best.unwrap();
+        assert!(Rc::ptr_eq(&option, &options[1]));
+        assert_eq!(delay, Fixed::ZERO);
+        assert_eq!(frontier.best_slack, fs(120));
+        assert_eq!(frontier.best_area, CellArea::new(1.0));
+        let mut alone = Frontier::new(None, 4);
+        alone.best_slack = fs(105);
+        assert!(
+            alone
+                .best_buffered(resizer, &sized, &options[..1])
+                .is_none()
+        );
+    });
+}
+
+#[test]
+fn a_buffer_that_cannot_drive_an_option_is_not_put_on_it() {
+    with_sized_search(plain_size, |resizer, _, size| {
+        let weak = BufferSize {
+            margined_max_cap: Farads::new(8e-15),
+            ..*size
+        };
+        let options = [option_node(10.0, 100, 0.0, None)];
+        let mut frontier = Frontier::new(None, 4);
+
+        assert!(frontier.best_buffered(resizer, &weak, &options).is_none());
+        assert!(frontier.best_buffered(resizer, size, &options).is_some());
+    });
+}
+
+#[test]
+fn an_area_frontier_charges_a_buffer_its_area_before_taking_it() {
+    with_sized_search(plain_size, |resizer, _, size| {
+        let exemplar = option_node(10.0, 500, 0.0, None);
+        let options = [option_node(10.0, 200, 0.0, None)];
+        let mut frontier = Frontier::new(Some((fs(100), &exemplar)), 4);
+        frontier.best_area = CellArea::new(0.5);
+
+        // 0 square microns and the buffer's 1 is not less than 0.5.
+        assert!(frontier.best_buffered(resizer, size, &options).is_none());
+        frontier.best_area = CellArea::new(1.5);
+        assert!(frontier.best_buffered(resizer, size, &options).is_some());
+    });
+}
+
+#[test]
+fn a_buffer_delays_an_option_by_its_delay_into_the_option_and_its_own_output() {
+    with_sized_search(plain_size, |resizer, _, size| {
+        let edges = Some(SlackEdges::Both);
+        let option = option_node(10.0, 100_000, 0.0, edges);
+        let expected = timing::buffer_delay(resizer, size, edges, Farads::new(15e-15));
+        assert!(expected > Fixed::ZERO);
+        let mut frontier = Frontier::new(None, 4);
+
+        let (_, delay) = frontier
+            .best_buffered(resizer, size, &[Rc::clone(&option)])
+            .unwrap();
+
+        assert_eq!(delay, expected);
+        // The buffered option must beat the best slack by more than the
+        // delay: one exactly at it is not taken.
+        let mut tied = Frontier::new(None, 4);
+        tied.best_slack = option.slack - expected;
+        assert!(tied.best_buffered(resizer, size, &[option]).is_none());
+    });
+}
+
+#[test]
+fn only_the_option_a_buffer_cannot_beat_stays_when_none_was_kept_before_it() {
+    with_sized_search(plain_size, |resizer, rebuffer, size| {
+        let small = |slack| option_node(1.0, slack, 0.0, None);
+        // Everything is lighter than the buffer's input, but the extra
+        // wire is too much for it to drive as it is.
+        let heavy_wire = Dbu::new(4_000_000);
+        let options = [small(100), small(300), small(200)];
+
+        let frontier = rebuffer.buffered_frontier(resizer, &options, heavy_wire, None);
+
+        // The last option alone is buffered: the near ones are not tried.
+        assert_eq!(frontier.kept.len(), 1);
+        assert!(matches!(frontier.kept[0].kind, Kind::Buffer { .. }));
+        assert_eq!(frontier.kept[0].slack, fs(200));
+        assert!(Rc::ptr_eq(frontier.kept[0].inner().unwrap(), &options[2]));
+        let _ = size;
+    });
+}
+
+#[test]
+fn a_frontier_over_no_options_is_empty() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        assert!(
+            rebuffer
+                .buffered_frontier(resizer, &[], Dbu::ZERO, None)
+                .kept
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+fn options_no_heavier_than_a_buffers_input_are_offered_and_heavier_ones_buffered() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let light = option_node(1.0, 100, 0.0, None);
+        let heavy = option_node(10.0, 200, 0.0, None);
+
+        let frontier = rebuffer.buffered_frontier(
+            resizer,
+            &[Rc::clone(&light), Rc::clone(&heavy)],
+            Dbu::ZERO,
+            None,
+        );
+
+        // The light one stays as it is; the buffer goes on the heavy one,
+        // which as it is would add no slack to the buffered one's.
+        assert_eq!(frontier.kept.len(), 2);
+        assert!(Rc::ptr_eq(&frontier.kept[0], &light));
+        assert!(matches!(frontier.kept[1].kind, Kind::Buffer { .. }));
+        assert!(Rc::ptr_eq(frontier.kept[1].inner().unwrap(), &heavy));
+    });
+}
+
+#[test]
+fn area_options_that_already_meet_the_target_get_no_extra_option() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let exemplar = option_node(10.0, 500, 0.0, None);
+        let mut options = vec![option_node(10.0, 450, 0.0, None)];
+
+        rebuffer
+            .insert_area_options(resizer, &mut options, Dbu::ZERO, (fs(400), &exemplar))
+            .unwrap();
+
+        // The buffered option and the option as it is: no third to make
+        // the target certain.
+        assert_eq!(options.len(), 2);
+    });
+}
+
+#[test]
+fn area_options_none_of_which_meets_the_target_fail() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let exemplar = option_node(10.0, 500, 0.0, None);
+        let mut options = vec![option_node(10.0, 300, 0.0, None)];
+
+        let outcome =
+            rebuffer.insert_area_options(resizer, &mut options, Dbu::ZERO, (fs(400), &exemplar));
+
+        assert_eq!(outcome, Err(AreaRecoveryFailed));
+    });
+}
+
+/// Runs `test` with a search whose buffer takes 1 ps before it does
+/// anything, so that only an assured fallback can put it on an option,
+/// and a buffered `exemplar` over a load at 500 fs of slack.
+fn with_fallback_only_search(
+    test: impl FnOnce(&Resizer<'_, Sta>, &mut Rebuffer, BufferSize, BnetPtr),
+) {
+    with_sized_search(
+        |base| BufferSize {
+            intrinsic_delay: fs(1000),
+            ..plain_size(base)
+        },
+        |resizer, rebuffer, size| {
+            let exemplar = Bnet::buffer(
+                Point::new(Dbu::ZERO, Dbu::ZERO),
+                size,
+                option_node(1.0, 500, 0.0, None),
+                Fixed::ZERO,
+            );
+            test(resizer, rebuffer, *size, exemplar);
+        },
+    );
+}
+
+/// What `insert_area_options` makes of `options` for a 400 fs target and
+/// a wire of over a thousand microns upstream, which the buffer cannot
+/// drive so that no option stands as it is.
+fn assured_options(
+    resizer: &Resizer<'_, Sta>,
+    rebuffer: &Rebuffer,
+    exemplar: &Bnet,
+    options: &[BnetPtr],
+) -> Result<Vec<BnetPtr>, AreaRecoveryFailed> {
+    let mut options = options.to_vec();
+    rebuffer
+        .insert_area_options(
+            resizer,
+            &mut options,
+            Dbu::new(4_000_000),
+            (fs(400), exemplar),
+        )
+        .map(|()| options)
+}
+
+#[test]
+fn the_assured_option_is_the_cheapest_the_exemplars_buffer_can_drive_to_the_target() {
+    with_fallback_only_search(|resizer, rebuffer, _, exemplar| {
+        let unreachable = option_node(60.0, 450, 0.5, None);
+        let costly = option_node(10.0, 450, 2.0, None);
+        let cheap = option_node(10.0, 450, 1.0, None);
+        let late = option_node(10.0, 350, 0.1, None);
+
+        let assured = assured_options(
+            resizer,
+            rebuffer,
+            &exemplar,
+            &[unreachable, costly, Rc::clone(&cheap), late],
+        )
+        .unwrap();
+
+        assert_eq!(assured.len(), 1);
+        assert!(matches!(assured[0].kind, Kind::Buffer { .. }));
+        assert!(Rc::ptr_eq(assured[0].inner().unwrap(), &cheap));
+    });
+}
+
+#[test]
+fn no_option_a_buffer_can_drive_to_the_target_leaves_no_assured_option() {
+    with_fallback_only_search(|resizer, rebuffer, _, exemplar| {
+        let options = [
+            option_node(60.0, 450, 0.5, None),
+            option_node(10.0, 350, 0.1, None),
+        ];
+
+        let outcome = assured_options(resizer, rebuffer, &exemplar, &options);
+
+        assert_eq!(outcome.err(), Some(AreaRecoveryFailed));
+    });
+}
+
+#[test]
+fn the_assured_buffer_is_timed_into_the_option_and_its_own_output() {
+    with_fallback_only_search(|resizer, rebuffer, size, exemplar| {
+        let edges = Some(SlackEdges::Both);
+        let right = timing::buffer_delay(resizer, &size, edges, Farads::new(15e-15));
+        let wrong = timing::buffer_delay(resizer, &size, edges, Farads::new(5e-15));
+        let gap = |a: Fixed, b: Fixed| a.to_seconds() - b.to_seconds();
+        assert!(gap(right, wrong) > Seconds::new(2e-15));
+        // Slack between the two delays' reach of the target: met only if
+        // the load is taken as the buffer sees it, which is not met.
+        let midpoint = (right.to_seconds() + wrong.to_seconds()) / 2.0;
+        let slack = Fixed::from_seconds(Seconds::new(400e-15) + midpoint);
+        let late = Rc::new(Bnet {
+            slack,
+            ..(*option_node(10.0, 0, 0.0, edges)).clone()
+        });
+
+        let assured = assured_options(resizer, rebuffer, &exemplar, &[late]);
+
+        assert_eq!(assured.err(), Some(AreaRecoveryFailed));
+    });
+}
+
+/// A constrained load of `cap_ff` femtofarads and `slack` femtoseconds at
+/// `x` database units along the axis.
+fn constrained_load(resizer: &Resizer<'_, Sta>, x: i64, cap_ff: f64, slack: i64) -> BnetPtr {
+    Bnet::load(
+        Point::new(Dbu::new(x), Dbu::ZERO),
+        pin(resizer.db, "f2/D"),
+        PinLoad {
+            cap: Farads::new(cap_ff * 1e-15),
+            fanout: 1.0,
+            max_slew: Seconds::INFINITY,
+        },
+    )
+    .with_slack(fs(slack), Some(SlackEdges::One(Edge::Rise)))
+}
+
+#[test]
+fn area_recovery_on_a_tree_short_of_its_target_keeps_the_slackest_option_it_has() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let load = constrained_load(resizer, 20_000, 10.0, 100_000);
+        let root = Bnet::wire(
+            Point::new(Dbu::ZERO, Dbu::ZERO),
+            load,
+            None,
+            &resizer.tree_rc(),
+        );
+
+        let recovered = rebuffer.recover_area(resizer, &root, fs(1_000_000), 0.0);
+
+        assert!(recovered.is_ok());
+    });
+}
+
+#[test]
+fn area_recovery_asks_each_node_for_its_target_plus_the_delay_above_it() {
+    with_sized_search(plain_size, |resizer, rebuffer, size| {
+        // Nothing but the load below a buffer and a wire, whose delay the
+        // buffer's target must make room for: at the target exactly, a
+        // load falls short of target plus that delay.
+        let target = 100_000;
+        let load = constrained_load(resizer, 20_000, 10.0, target);
+        let buffer = Bnet::buffer(
+            Point::new(Dbu::new(20_000), Dbu::ZERO),
+            size,
+            load,
+            Fixed::ZERO,
+        );
+        let root = Bnet::wire(
+            Point::new(Dbu::ZERO, Dbu::ZERO),
+            buffer,
+            None,
+            &resizer.tree_rc(),
+        );
+        assert!(root.delay > Fixed::ZERO);
+
+        let recovered = rebuffer.recover_area(resizer, &root, fs(target), 1.0);
+
+        assert_eq!(recovered.err(), Some(AreaRecoveryFailed));
+    });
+}
+
+#[test]
+fn a_buffer_node_takes_the_size_of_its_own_buffer_and_times_it_into_its_load() {
+    let mut db = buffer_between_flops("PLACED");
+    let lib = cells(&clock_cells_source());
+    with_wired_session(&mut db, &lib, CLOCK, |resizer| {
+        let mut rebuffer = Rebuffer::new(resizer).unwrap();
+        let own = lib.buffer_cell(lib.cell_id("BUF_X1").unwrap()).unwrap();
+        let other = lib.buffer_cell(lib.cell_id("CLKBUF_X3").unwrap()).unwrap();
+        let size = |buffer, input_ff: f64| BufferSize {
+            buffer,
+            input_cap: Farads::new(input_ff * 1e-15),
+            output_cap: Farads::new(5e-15),
+            ..rebuffer.sizes[0]
+        };
+        rebuffer.sizes = vec![size(own, 2.0), size(other, 3.0)];
+        let edges = Some(SlackEdges::Both);
+        let load = option_node(10.0, 100_000, 0.0, edges);
+        let origin = Point::new(Dbu::ZERO, Dbu::ZERO);
+
+        let first = rebuffer.buffer_node(resizer, origin, own, Rc::clone(&load));
+        let second = rebuffer.buffer_node(resizer, origin, other, Rc::clone(&load));
+
+        assert_eq!(first.cap, rebuffer.sizes[0].input_cap);
+        assert_eq!(second.cap, rebuffer.sizes[1].input_cap);
+        assert_ne!(first.cap, second.cap);
+        let delay =
+            |size: &BufferSize| timing::buffer_delay(resizer, size, edges, Farads::new(15e-15));
+        assert_eq!(first.delay, delay(&rebuffer.sizes[0]));
+        assert!(first.delay > Fixed::ZERO);
+    });
+}
+
+#[test]
+fn a_buffer_node_of_a_buffer_the_search_does_not_use_is_sized_from_the_library() {
+    with_search(|resizer, rebuffer| {
+        let lib = resizer.link.liberty;
+        let unused = lib.buffer_cell(lib.cell_id("CLKBUF_X3").unwrap()).unwrap();
+        let load = option_node(10.0, 100_000, 0.0, None);
+
+        let node = rebuffer.buffer_node(resizer, Point::new(Dbu::ZERO, Dbu::ZERO), unused, load);
+
+        assert_eq!(
+            node.cap,
+            lib.cell(unused.id).ports[unused.input].capacitance()
+        );
+    });
+}
+
+/// `DFF_X1` with a 4 fF output pin.
+fn flop_with_output_cap() -> pare_common::db::liberty::Liberty {
+    let source = clock_cells_source();
+    let at = source.find("cell (DFF_X1)").unwrap();
+    let q = at + source[at..].find("pin (Q) {").unwrap();
+    let mut text = source;
+    text.insert_str(q + "pin (Q) {".len(), " capacitance : 4.0 ;");
+    cells(&text)
+}
+
+#[test]
+fn the_driver_is_timed_into_the_tree_and_its_own_output_pin() {
+    let mut db = buffered_clock_pair();
+    let q = pin(&db, "f1/Q");
+    with_timed_session(&mut db, &flop_with_output_cap(), CLOCK, |resizer| {
+        let mut rebuffer = Rebuffer::new(resizer).unwrap();
+        assert!(rebuffer.set_driver(resizer, q));
+        let plain = resizer.buffered_tree(q).unwrap().unwrap();
+        let tree = rebuffer.annotate_load_slacks(resizer, &plain, q);
+        let SlackEdges::One(edge) = tree.slack_edges.unwrap() else {
+            panic!("one edge expected")
+        };
+        let driver = rebuffer.driver.clone().unwrap();
+        let cell = resizer.link.liberty.cell(driver.cell);
+        let point = driver.arrival_paths[edge].unwrap();
+
+        let timing = rebuffer.driver_timing(resizer, &tree);
+
+        let load = tree.cap + Farads::new(4e-15);
+        let expected = timing_through(resizer, cell, &point, edge, load).unwrap();
+        assert_eq!(timing.delay, expected.delay);
+        assert!(expected.delay > Seconds::ZERO);
+    });
+}
+
+/// Runs `test` on a wired session over [`buffered_clock_pair`] with a
+/// search driven by `f1/Q` and the tree of its net timed.
+fn with_timed_tree(test: impl FnOnce(&Resizer<'_, Sta>, &mut Rebuffer, &Bnet)) {
+    let mut db = buffered_clock_pair();
+    let q = pin(&db, "f1/Q");
+    with_wired_session(&mut db, &cells(&clock_cells_source()), CLOCK, |resizer| {
+        let mut rebuffer = Rebuffer::new(resizer).unwrap();
+        assert!(rebuffer.set_driver(resizer, q));
+        let plain = resizer.buffered_tree(q).unwrap().unwrap();
+        let tree = rebuffer.annotate_load_slacks(resizer, &plain, q);
+        test(resizer, &mut rebuffer, &tree);
+    });
+}
+
+/// `tree` with another slew limit among its loads.
+fn with_slew_limit(tree: &Bnet, limit: Seconds) -> Bnet {
+    Bnet {
+        kind: tree.kind.clone(),
+        max_load_slew: limit,
+        ..*tree
+    }
+}
+
+#[test]
+fn a_driver_must_reach_every_load_within_its_slew_limit_by_the_elmore_estimate() {
+    with_timed_tree(|resizer, rebuffer, tree| {
+        let driver = rebuffer.driver.clone().unwrap();
+        let resistance = resizer
+            .link
+            .liberty
+            .cell(driver.cell)
+            .drive_resistance(driver.port);
+        let wire = Meters::from_dbu(tree.max_load_wire_length(), resizer.db.dbu());
+        assert!(wire > Meters::ZERO);
+        // Driver and wire in series into the whole capacitance, at the
+        // Elmore factor for 20 to 80 percent, against 80 percent of the
+        // limit.
+        let slew = (resistance + wire * resizer.graph.wire_rc().resistance) * tree.cap * 1.39;
+        let limit = |scale: f64| with_slew_limit(tree, slew / 0.8 * scale);
+
+        assert!(rebuffer.evaluate_option(resizer, &limit(1.001)).is_some());
+        assert!(rebuffer.evaluate_option(resizer, &limit(0.999)).is_none());
+    });
+}
+
+#[test]
+fn a_driver_over_its_slew_limit_may_only_drive_what_it_has_driven_before() {
+    with_timed_tree(|resizer, rebuffer, tree| {
+        let slew = rebuffer.driver_timing(resizer, tree).slew;
+        assert!(slew > Seconds::ZERO);
+        let drive = |rebuffer: &mut Rebuffer, limit: Seconds, seen: Farads| {
+            let driver = rebuffer.driver.as_mut().unwrap();
+            driver.max_slew = limit;
+            driver.load_high_water_mark = seen;
+            rebuffer.evaluate_option(resizer, tree).is_some()
+        };
+
+        // Over the limit and heavier than any seen: refused. Not heavier,
+        // or not over: driven.
+        assert!(!drive(rebuffer, slew / 2.0, Farads::ZERO));
+        assert!(drive(rebuffer, slew / 2.0, tree.cap));
+        assert!(drive(rebuffer, slew / 2.0, tree.cap * 2.0));
+        assert!(drive(rebuffer, slew, Farads::ZERO));
+        assert!(drive(rebuffer, slew * 2.0, Farads::ZERO));
+        // A drive raises the mark to the load's, from none seen.
+        let driver = rebuffer.driver.as_ref().unwrap();
+        assert_eq!(driver.load_high_water_mark, tree.cap);
+    });
+}
+
+#[test]
+fn a_junction_pairs_its_sides_options_from_the_most_slack_down_by_falling_capacitance() {
+    with_search(|resizer, rebuffer| {
+        let side = |options: &[(f64, i64)]| -> Vec<BnetPtr> {
+            options
+                .iter()
+                .map(|&(cap, slack)| option_node(cap, slack, 0.0, None))
+                .collect()
+        };
+        let left = side(&[(3.0, 30), (6.0, 40)]);
+        let right = side(&[(2.0, 30), (5.0, 40), (7.0, 70)]);
+        let node = Bnet::junction(
+            Point::new(Dbu::ZERO, Dbu::ZERO),
+            Rc::clone(&left[1]),
+            Rc::clone(&right[2]),
+        );
+        let sides = JunctionSides {
+            left: &left,
+            right: &right,
+        };
+
+        let options = rebuffer.junction_options(resizer, &node, sides, Topology::Kept);
+
+        // Each side steps down while the other has no more slack, so the
+        // pairs are those two, and the one lighter is listed first.
+        let pairs: Vec<(Farads, Fixed)> = options.iter().map(|o| (o.cap, o.slack)).collect();
+        assert_eq!(
+            pairs,
+            [
+                (left[0].cap + right[0].cap, fs(30)),
+                (left[1].cap + right[1].cap, fs(40))
+            ]
+        );
+    });
+}
+
+#[test]
+fn a_junction_with_a_side_without_options_has_none() {
+    with_search(|resizer, rebuffer| {
+        let load = [option_node(3.0, 30, 0.0, None)];
+        let node = Bnet::junction(
+            Point::new(Dbu::ZERO, Dbu::ZERO),
+            Rc::clone(&load[0]),
+            Rc::clone(&load[0]),
+        );
+        for (left, right) in [
+            (&load[..], &[][..]),
+            (&[][..], &load[..]),
+            (&[][..], &[][..]),
+        ] {
+            let sides = JunctionSides { left, right };
+
+            assert!(
+                rebuffer
+                    .junction_options(resizer, &node, sides, Topology::Kept)
+                    .is_empty()
+            );
+        }
+    });
+}
+
+#[test]
+fn the_loads_of_a_net_an_input_port_drives_are_given_the_slack_of_their_worst_path() {
+    let mut db = design(
+        "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN ports ;\n\
+         UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 80000 40000 ) ;\n\
+         COMPONENTS 1 ;\n- bf BUF_X1 + PLACED ( 30000 2800 ) N ;\nEND COMPONENTS\n\
+         PINS 3 ;\n- clk + NET clk + DIRECTION INPUT ;\n- in + NET in + DIRECTION INPUT ;\n\
+         - out + NET out + DIRECTION OUTPUT ;\nEND PINS\n\
+         NETS 3 ;\n- clk ( PIN clk ) ;\n- in ( PIN in ) ( bf A ) ;\n\
+         - out ( bf Z ) ( PIN out ) ;\nEND NETS\nEND DESIGN\n",
+    );
+    let port = db.io_pins[db.io_pin_id("in").unwrap()].pin;
+    let constraints = format!(
+        "{CLOCK}set_input_delay 0.1 -clock clk [get_ports in]\n\
+         set_output_delay 0.1 -clock clk [get_ports out]\n"
+    );
+    with_wired_session(
+        &mut db,
+        &cells(&clock_cells_source()),
+        &constraints,
+        |resizer| {
+            let mut rebuffer = Rebuffer::new(resizer).unwrap();
+            let plain = resizer.buffered_tree(port).unwrap().unwrap();
+
+            let tree = rebuffer.annotate_load_slacks(resizer, &plain, port);
+
+            assert!(tree.slack_edges.is_some());
+            assert!(tree.slack < Fixed::INF);
+        },
+    );
+}
+
+#[test]
+fn a_load_limit_found_by_the_slew_growing_slowly_expands_the_guess_and_then_bisects() {
+    // Output slew of 0.15 ns at 1 fF and 0.17 ns at 100 fF, growing along
+    // that line beyond, against 80 percent of a 0.3 ns limit: 0.24 ns, at
+    // 446.5 fF. The first guess, 0.24 ns over the 1.7 kilohm drive twice,
+    // is 282.4 fF, short of it, so it doubles to 564.7 fF; the bisection
+    // between them stops at 445.588 fF, within a hundredth.
+    let cell = "cell (GENTLE) { area : 1.0 ; \
+        pin (A) { direction : input ; capacitance : 1.0 ; } \
+        pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 1000.0 ; \
+        max_transition : 0.3 ; \
+        timing () { related_pin : \"A\" ; timing_sense : positive_unate ; \
+        cell_rise (delay_t) { values (\"0.03, 0.30\", \"0.04, 0.31\") ; } \
+        cell_fall (delay_t) { values (\"0.03, 0.30\", \"0.04, 0.31\") ; } \
+        rise_transition (delay_t) { values (\"0.15, 0.17\", \"0.15, 0.17\") ; } \
+        fall_transition (delay_t) { values (\"0.15, 0.17\", \"0.15, 0.17\") ; } } } }\n";
+    let mut db = buffer_between_flops("PLACED");
+    let lib = cells_with(cell);
+    with_wired_session(&mut db, &lib, CLOCK, |resizer| {
+        let buffer = lib.buffer_cell(lib.cell_id("GENTLE").unwrap()).unwrap();
+
+        let limit = buffer_size(resizer, buffer).margined_max_cap;
+
+        assert!(((limit.get() - 4.455_882_352_941_176e-13) / limit.get()).abs() < 1e-6);
+    });
 }
