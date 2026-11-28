@@ -2027,3 +2027,91 @@ fn a_load_limit_found_by_the_slew_growing_slowly_expands_the_guess_and_then_bise
         assert!(((limit.get() - 4.455_882_352_941_176e-13) / limit.get()).abs() < 1e-6);
     });
 }
+
+/// A junction of a critical pair of loads, `P0` of 1 fF and `P1` of 5 fF,
+/// with slacks `slacks`, beside a buffer on a load `P2` of 5 fF at 10 ps
+/// of slack whose own slack is `buffered_slack`; and what
+/// [`Rebuffer::junction_options`] makes of them, rewriting allowed.
+fn rewritten_junction(
+    resizer: &Resizer<'_, Sta>,
+    rebuffer: &Rebuffer,
+    slacks: (i64, i64),
+    buffered_slack: i64,
+) -> Vec<BnetPtr> {
+    let origin = Point::new(Dbu::ZERO, Dbu::ZERO);
+    let critical = Bnet::junction(
+        origin,
+        raw_load(PinId::new(0), 1.0, slacks.0),
+        raw_load(PinId::new(1), 5.0, slacks.1),
+    );
+    let buffered = Bnet::buffer(
+        origin,
+        &rebuffer.sizes[0],
+        raw_load(PinId::new(2), 5.0, 10_000),
+        Fixed::ZERO,
+    )
+    .with_slack(fs(buffered_slack), None);
+    let node = Bnet::junction(origin, Rc::clone(&critical), Rc::clone(&buffered));
+    let (left, right) = ([critical], [buffered]);
+    let sides = JunctionSides {
+        left: &left,
+        right: &right,
+    };
+    rebuffer.junction_options(resizer, &node, sides, Topology::Rewritable)
+}
+
+#[test]
+fn a_junction_of_equal_slack_sides_is_critical_on_its_right() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let options = rewritten_junction(resizer, rebuffer, (1000, 5000), 1000);
+
+        // The right is the buffer, which has no junction to pull a half
+        // out of.
+        assert_eq!(options.len(), 1);
+        assert!(!is_rewritten(&options[0]));
+    });
+}
+
+#[test]
+fn a_critical_side_with_equal_halves_keeps_its_left_half_as_critical() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let options = rewritten_junction(resizer, rebuffer, (1000, 1000), 10_000);
+
+        assert!(is_rewritten(&options[0]));
+        let Kind::Junction { right, .. } = &options[0].kind else {
+            panic!("a junction")
+        };
+        assert_eq!(right.loads(), [PinId::new(0)]);
+    });
+}
+
+#[test]
+fn a_critical_side_with_a_slacker_right_half_pulls_that_half_under_the_buffer() {
+    with_sized_search(plain_size, |resizer, rebuffer, _| {
+        let options = rewritten_junction(resizer, rebuffer, (1000, 5000), 10_000);
+
+        assert!(is_rewritten(&options[0]));
+        let Kind::Junction { left, right } = &options[0].kind else {
+            panic!("a junction")
+        };
+        assert_eq!(right.loads(), [PinId::new(0)]);
+        let mut under = left.loads();
+        under.sort_unstable();
+        assert_eq!(under, [PinId::new(1), PinId::new(2)]);
+    });
+}
+
+#[test]
+fn a_buffer_that_delays_the_pulled_half_below_the_junctions_slack_is_not_put_in() {
+    let slow = |base| BufferSize {
+        intrinsic_delay: fs(10),
+        ..plain_size(base)
+    };
+    with_sized_search(slow, |resizer, rebuffer, _| {
+        // The pulled half sits at exactly the junction's slack, which
+        // the buffer's 10 fs of intrinsic delay would take it under.
+        let options = rewritten_junction(resizer, rebuffer, (1000, 1000), 10_000);
+
+        assert!(!is_rewritten(&options[0]));
+    });
+}
