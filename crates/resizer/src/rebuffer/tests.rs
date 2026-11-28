@@ -355,7 +355,7 @@ fn with_search(test: impl FnOnce(&mut Resizer<'_, Sta>, &mut Rebuffer)) {
 /// Whether `strong` can drive `tree` and `extra` of wire more, by whether a
 /// timing frontier keeps it.
 fn is_driven(resizer: &Resizer<'_, Sta>, strong: &BufferSize, tree: &BnetPtr, extra: Dbu) -> bool {
-    let mut frontier = Frontier::new(None, 1);
+    let mut frontier = Frontier::new(None);
     frontier.offer(resizer, strong, tree, extra);
     !frontier.kept.is_empty()
 }
@@ -1378,7 +1378,7 @@ fn plain_size(base: BufferSize) -> BufferSize {
 #[test]
 fn a_timing_frontier_keeps_only_options_with_more_slack_than_those_kept() {
     with_sized_search(plain_size, |resizer, _, size| {
-        let mut frontier = Frontier::new(None, 4);
+        let mut frontier = Frontier::new(None);
 
         for slack in [100, 100, 50, 150] {
             frontier.offer(
@@ -1400,7 +1400,7 @@ fn an_area_frontier_keeps_only_options_with_less_area_and_enough_slack() {
     with_sized_search(plain_size, |resizer, _, size| {
         let exemplar = option_node(10.0, 500, 0.0, None);
         let offer_all = |options: &[(f64, i64)]| {
-            let mut frontier = Frontier::new(Some((fs(100), &exemplar)), 4);
+            let mut frontier = Frontier::new(Some((fs(100), &exemplar)));
             for &(area, slack) in options {
                 frontier.offer(
                     resizer,
@@ -1435,7 +1435,7 @@ fn a_buffer_is_put_on_the_option_that_it_buffers_best_and_can_drive() {
             option_node(10.0, 112, 0.0, None),
             option_node(10.0, 120, 0.0, None),
         ];
-        let mut frontier = Frontier::new(None, 4);
+        let mut frontier = Frontier::new(None);
         frontier.best_slack = fs(105);
 
         // The first has 102 left once the intrinsic delay is taken off,
@@ -1448,7 +1448,7 @@ fn a_buffer_is_put_on_the_option_that_it_buffers_best_and_can_drive() {
         assert_eq!(delay, Fixed::ZERO);
         assert_eq!(frontier.best_slack, fs(120));
         assert_eq!(frontier.best_area, CellArea::new(1.0));
-        let mut alone = Frontier::new(None, 4);
+        let mut alone = Frontier::new(None);
         alone.best_slack = fs(105);
         assert!(
             alone
@@ -1466,7 +1466,7 @@ fn a_buffer_that_cannot_drive_an_option_is_not_put_on_it() {
             ..*size
         };
         let options = [option_node(10.0, 100, 0.0, None)];
-        let mut frontier = Frontier::new(None, 4);
+        let mut frontier = Frontier::new(None);
 
         assert!(frontier.best_buffered(resizer, &weak, &options).is_none());
         assert!(frontier.best_buffered(resizer, size, &options).is_some());
@@ -1478,7 +1478,7 @@ fn an_area_frontier_charges_a_buffer_its_area_before_taking_it() {
     with_sized_search(plain_size, |resizer, _, size| {
         let exemplar = option_node(10.0, 500, 0.0, None);
         let options = [option_node(10.0, 200, 0.0, None)];
-        let mut frontier = Frontier::new(Some((fs(100), &exemplar)), 4);
+        let mut frontier = Frontier::new(Some((fs(100), &exemplar)));
         frontier.best_area = CellArea::new(0.5);
 
         // 0 square microns and the buffer's 1 is not less than 0.5.
@@ -1495,7 +1495,7 @@ fn a_buffer_delays_an_option_by_its_delay_into_the_option_and_its_own_output() {
         let option = option_node(10.0, 100_000, 0.0, edges);
         let expected = timing::buffer_delay(resizer, size, edges, Farads::new(15e-15));
         assert!(expected > Fixed::ZERO);
-        let mut frontier = Frontier::new(None, 4);
+        let mut frontier = Frontier::new(None);
 
         let (_, delay) = frontier
             .best_buffered(resizer, size, &[Rc::clone(&option)])
@@ -1504,7 +1504,7 @@ fn a_buffer_delays_an_option_by_its_delay_into_the_option_and_its_own_output() {
         assert_eq!(delay, expected);
         // The buffered option must beat the best slack by more than the
         // delay: one exactly at it is not taken.
-        let mut tied = Frontier::new(None, 4);
+        let mut tied = Frontier::new(None);
         tied.best_slack = option.slack - expected;
         assert!(tied.best_buffered(resizer, size, &[option]).is_none());
     });
