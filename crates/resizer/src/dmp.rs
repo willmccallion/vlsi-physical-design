@@ -640,8 +640,11 @@ fn zero_c2(common: &Common<'_>, rd: f64, pi: Pi) -> RawDelay {
     let eqns =
         |x: &mut [f64; 2], fvec: &mut [f64; 2], fjac: &mut [[f64; 2]; 2]| -> Result<(), DmpError> {
             let (t_vth, t_vl, _) = common.gate_delays(ceff);
+            // NOTE: DmpOnePole::evalDmpEqns resets the width to (t_vl - t_vth) / 100,
+            // which is negative; PARE takes the positive width it means. In 40,000
+            // seeded searches no fit converged after the reset either way.
             if x[1] <= 0.0 {
-                x[1] = (t_vl - t_vth) / 100.0;
+                x[1] = (t_vth - t_vl) / 100.0;
             }
             let (t0, dt) = (x[0], x[1]);
             fvec[1] = y(t_vth, t0, dt, rd, ceff) - common.vth;
