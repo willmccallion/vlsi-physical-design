@@ -17,7 +17,7 @@ fn design_repair_reports_as_fields_of_its_summary() {
     assert_eq!(
         json,
         "{\"buffers_removed\":1,\"input_buffers\":0,\"output_buffers\":0,\"buffer_cell\":\"\",\
-             \"slew_violations\":2,\"cap_violations\":0,\"repaired_nets\":0,\"resized\":0,\
+             \"slew_violations\":2,\"cap_violations\":0,\"fanout_violations\":0,\"repaired_nets\":0,\"resized\":0,\
              \"repeaters\":3}"
     );
 }
