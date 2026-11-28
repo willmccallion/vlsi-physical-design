@@ -1,4 +1,6 @@
 use super::*;
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngSeed};
 use std::collections::HashSet;
 
 fn rect(x0: i64, y0: i64, x1: i64, y1: i64) -> Rect<Dbu> {
@@ -241,33 +243,6 @@ fn covering_a_rectangle_without_area_needs_every_point_of_it_edges_included() {
     assert!(!region.covers_rect(&rect(0, 10, 6, 10)));
 }
 
-/// A small deterministic generator for the randomised comparisons.
-struct Lcg(u64);
-
-impl Lcg {
-    fn below(&mut self, n: i64) -> i64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        i64::try_from((self.0 >> 33) % u64::try_from(n).unwrap()).unwrap()
-    }
-
-    fn rects(&mut self, count: usize, side: i64) -> Vec<Rect<Dbu>> {
-        (0..count)
-            .map(|_| {
-                let (x, y) = (self.below(side), self.below(side));
-                rect(
-                    x,
-                    y,
-                    x + 1 + self.below(side - x),
-                    y + 1 + self.below(side - y),
-                )
-            })
-            .collect()
-    }
-}
-
 /// Whether the unit cell with lower-left corner `(x, y)` lies in `rects`.
 fn cell_in(rects: &[Rect<Dbu>], x: i64, y: i64) -> bool {
     rects.iter().any(|r| r.encloses(&rect(x, y, x + 1, y + 1)))
@@ -279,24 +254,6 @@ fn cells(region: &Region, side: i64) -> HashSet<(i64, i64)> {
         .flat_map(|x| (0..=side).map(move |y| (x, y)))
         .filter(|&(x, y)| cell_in(&rects, x, y))
         .collect()
-}
-
-#[test]
-fn boolean_operations_match_cell_by_cell_membership() {
-    let mut lcg = Lcg(7);
-    for _ in 0..200 {
-        let (ra, rb) = (lcg.rects(4, 12), lcg.rects(4, 12));
-        let (a, b) = (
-            Region::from_rects(ra.clone()),
-            Region::from_rects(rb.clone()),
-        );
-        let (ca, cb) = (cells(&a, 12), cells(&b, 12));
-
-        assert_eq!(cells(&a.union(&b), 12), &ca | &cb);
-        assert_eq!(cells(&a.intersection(&b), 12), &ca & &cb);
-        assert_eq!(cells(&a.difference(&b), 12), &ca - &cb);
-        assert_eq!(a.area().get(), i64::try_from(ca.len()).unwrap());
-    }
 }
 
 /// Maximal rectangles of the unit-cell set `inside`, by trying every
@@ -325,131 +282,24 @@ fn brute_max_rectangles(inside: &HashSet<(i64, i64)>, side: i64) -> Vec<(i64, i6
     sorted(maximal)
 }
 
-#[test]
-fn maximal_rectangles_match_an_exhaustive_search() {
-    let mut lcg = Lcg(11);
-    for _ in 0..60 {
-        let region = Region::from_rects(lcg.rects(3, 8));
-
-        let got = sorted(region.max_rectangles().iter().map(key).collect());
-
-        assert_eq!(got, brute_max_rectangles(&cells(&region, 8), 8));
-    }
-}
-
-#[test]
-fn edges_add_up_to_the_boundary_of_each_cell_set() {
-    let mut lcg = Lcg(13);
-    for _ in 0..100 {
-        let region = Region::from_rects(lcg.rects(4, 10));
-        let inside = cells(&region, 10);
-        let boundary: i64 = inside
-            .iter()
-            .map(|&(x, y)| {
-                [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                    .iter()
-                    .filter(|c| !inside.contains(c))
-                    .count()
-            })
-            .sum::<usize>()
-            .try_into()
-            .unwrap();
-
-        let length: i64 = region.edges().iter().map(|e| e.length().get()).sum();
-
-        assert_eq!(length, boundary);
-    }
-}
-
-#[test]
-fn every_edge_ends_where_another_starts() {
-    let mut lcg = Lcg(17);
-    for _ in 0..100 {
-        let region = Region::from_rects(lcg.rects(4, 10));
-        let edges = region.edges();
-        let mut starts: Vec<(i64, i64)> = edges
-            .iter()
-            .map(|e| (e.from.x.get(), e.from.y.get()))
-            .collect();
-        let mut ends: Vec<(i64, i64)> =
-            edges.iter().map(|e| (e.to.x.get(), e.to.y.get())).collect();
-        starts.sort_unstable();
-        ends.sort_unstable();
-
-        assert_eq!(starts, ends);
-        assert!(edges.iter().all(|e| e.length() > Dbu::ZERO));
-    }
-}
-
 fn continues_straight(first: &Edge, second: &Edge) -> bool {
     let meets = first.to == second.from;
     meets && first.heading() == second.heading()
 }
 
-#[test]
-fn no_edge_continues_straight_into_another() {
-    let mut lcg = Lcg(23);
-    for _ in 0..100 {
-        let edges = Region::from_rects(lcg.rects(4, 10)).edges();
-
-        let joins_straight = edges
-            .iter()
-            .any(|a| edges.iter().any(|b| a != b && continues_straight(a, b)));
-
-        assert!(!joins_straight);
-    }
-}
-
-#[test]
-fn components_partition_the_region() {
-    let mut lcg = Lcg(19);
-    for _ in 0..100 {
-        let region = Region::from_rects(lcg.rects(5, 12));
-
-        let pieces = region.components();
-        let joined = pieces.iter().fold(Region::new(), |acc, p| acc.union(p));
-        let total: i64 = pieces.iter().map(|p| p.area().get()).sum();
-
-        assert_eq!(joined, region);
-        assert_eq!(total, region.area().get());
-    }
-}
-
-/// Asserts `slices` partition `region`: none empty, none overlapping,
+/// Checks that `slices` partition `region`: none empty, none overlapping,
 /// together all of it.
-fn assert_partition(region: &Region, slices: &[Rect<Dbu>]) {
+fn assert_partition(region: &Region, slices: &[Rect<Dbu>]) -> Result<(), TestCaseError> {
     let area: i64 = slices.iter().map(|r| r.area().get()).sum();
 
-    assert!(
+    prop_assert!(
         slices
             .iter()
             .all(|r| r.width() > Dbu::ZERO && r.height() > Dbu::ZERO)
     );
-    assert_eq!(&Region::from_rects(slices.iter().copied()), region);
-    assert_eq!(area, region.area().get());
-}
-
-#[test]
-fn slices_partition_random_regions() {
-    let mut lcg = Lcg(31);
-    for _ in 0..1000 {
-        let region = Region::from_rects(lcg.rects(5, 12));
-
-        assert_partition(&region, &region.horizontal_slices());
-        assert_partition(&region, &region.vertical_slices());
-    }
-}
-
-#[test]
-fn slices_partition_random_regions_with_holes() {
-    let mut lcg = Lcg(37);
-    for _ in 0..1000 {
-        let outer = Region::from_rects(lcg.rects(4, 14));
-        let region = outer.difference(&Region::from_rects(lcg.rects(4, 14)));
-
-        assert_partition(&region, &region.horizontal_slices());
-        assert_partition(&region, &region.vertical_slices());
-    }
+    prop_assert_eq!(&Region::from_rects(slices.iter().copied()), region);
+    prop_assert_eq!(area, region.area().get());
+    Ok(())
 }
 
 #[test]
@@ -518,43 +368,6 @@ fn flood_fill(cells: &HashSet<(i64, i64)>) -> Vec<HashSet<(i64, i64)>> {
 }
 
 #[test]
-fn components_match_the_edge_connected_groups_of_cells() {
-    let mut lcg = Lcg(19);
-    for _ in 0..300 {
-        let region = Region::from_rects(lcg.rects(6, 12));
-
-        let mut pieces: Vec<Vec<(i64, i64)>> = region
-            .components()
-            .iter()
-            .map(|c| sorted(cells(c, 12).into_iter().collect()))
-            .collect();
-        let mut groups: Vec<Vec<(i64, i64)>> = flood_fill(&cells(&region, 12))
-            .into_iter()
-            .map(|g| sorted(g.into_iter().collect()))
-            .collect();
-        pieces.sort();
-        groups.sort();
-
-        assert_eq!(pieces, groups);
-    }
-}
-
-#[test]
-fn covering_matches_cell_by_cell_membership() {
-    let mut lcg = Lcg(23);
-    for _ in 0..300 {
-        let region = Region::from_rects(lcg.rects(4, 12));
-        let inside = cells(&region, 12);
-        let probe = lcg.rects(1, 12)[0];
-
-        let expected = (probe.min.x.get()..probe.max.x.get())
-            .all(|x| (probe.min.y.get()..probe.max.y.get()).all(|y| inside.contains(&(x, y))));
-
-        assert_eq!(region.covers_rect(&probe), expected, "{probe:?}");
-    }
-}
-
-#[test]
 fn a_rectangle_meeting_the_region_only_along_an_edge_shares_no_area() {
     let region = ell();
 
@@ -568,20 +381,176 @@ fn a_rectangle_meeting_the_region_only_along_an_edge_shares_no_area() {
     assert!(region.intersects_rect(&rect(0, -5, 5, 1)));
 }
 
-#[test]
-fn covering_agrees_with_the_regions_rectangles_covering() {
-    let mut lcg = Lcg(11);
-    for _ in 0..300 {
-        let region = Region::from_rects(lcg.rects(3, 12));
-        let pieces: Vec<Rect<Dbu>> = region.rectangles().collect();
-        let (x, y) = (lcg.below(13), lcg.below(13));
-        let (w, h) = (lcg.below(13 - x), lcg.below(13 - y));
-        let probe = rect(x, y, x + w, y + h);
+/// One to `count` rectangles with area inside the `side` by `side` square
+/// at the origin.
+fn rects(count: usize, side: i64) -> impl Strategy<Value = Vec<Rect<Dbu>>> {
+    prop::collection::vec(probe(side, 1), 1..=count)
+}
 
-        assert_eq!(
+/// A rectangle inside the `side` by `side` square at the origin, at least
+/// `least` wide and high.
+fn probe(side: i64, least: i64) -> impl Strategy<Value = Rect<Dbu>> {
+    (0..=side - least, 0..=side - least)
+        .prop_flat_map(move |(x, y)| (Just(x), Just(y), least..=side - x, least..=side - y))
+        .prop_map(|(x, y, w, h)| rect(x, y, x + w, y + h))
+}
+
+fn region_config(cases: u32) -> Config {
+    Config {
+        cases,
+        rng_seed: RngSeed::Fixed(73),
+        failure_persistence: None,
+        ..Config::default()
+    }
+}
+
+proptest! {
+    #![proptest_config(region_config(300))]
+
+    #[test]
+    fn boolean_operations_match_cell_by_cell_membership(ra in rects(4, 12), rb in rects(4, 12)) {
+        let (a, b) = (Region::from_rects(ra), Region::from_rects(rb));
+        let (ca, cb) = (cells(&a, 12), cells(&b, 12));
+
+        prop_assert_eq!(cells(&a.union(&b), 12), &ca | &cb);
+        prop_assert_eq!(cells(&a.intersection(&b), 12), &ca & &cb);
+        prop_assert_eq!(cells(&a.difference(&b), 12), &ca - &cb);
+        prop_assert_eq!(a.area().get(), i64::try_from(ca.len()).unwrap());
+    }
+
+    #[test]
+    fn edges_add_up_to_the_boundary_of_each_cell_set(rs in rects(4, 10)) {
+        let region = Region::from_rects(rs);
+        let inside = cells(&region, 10);
+        let boundary: i64 = inside
+            .iter()
+            .map(|&(x, y)| {
+                [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                    .iter()
+                    .filter(|c| !inside.contains(c))
+                    .count()
+            })
+            .sum::<usize>()
+            .try_into()
+            .unwrap();
+
+        let length: i64 = region.edges().iter().map(|e| e.length().get()).sum();
+
+        prop_assert_eq!(length, boundary);
+    }
+
+    #[test]
+    fn every_edge_ends_where_another_starts(rs in rects(4, 10)) {
+        let edges = Region::from_rects(rs).edges();
+
+        let mut starts: Vec<(i64, i64)> = edges
+            .iter()
+            .map(|e| (e.from.x.get(), e.from.y.get()))
+            .collect();
+        let mut ends: Vec<(i64, i64)> =
+            edges.iter().map(|e| (e.to.x.get(), e.to.y.get())).collect();
+        starts.sort_unstable();
+        ends.sort_unstable();
+
+        prop_assert_eq!(starts, ends);
+        prop_assert!(edges.iter().all(|e| e.length() > Dbu::ZERO));
+    }
+
+    #[test]
+    fn no_edge_continues_straight_into_another(rs in rects(4, 10)) {
+        let edges = Region::from_rects(rs).edges();
+
+        let joins_straight = edges
+            .iter()
+            .any(|a| edges.iter().any(|b| a != b && continues_straight(a, b)));
+
+        prop_assert!(!joins_straight);
+    }
+
+    #[test]
+    fn components_partition_the_region(rs in rects(5, 12)) {
+        let region = Region::from_rects(rs);
+
+        let pieces = region.components();
+
+        let joined = pieces.iter().fold(Region::new(), |acc, p| acc.union(p));
+        let total: i64 = pieces.iter().map(|p| p.area().get()).sum();
+        prop_assert_eq!(&joined, &region);
+        prop_assert_eq!(total, region.area().get());
+    }
+
+    #[test]
+    fn components_match_the_edge_connected_groups_of_cells(rs in rects(6, 12)) {
+        let region = Region::from_rects(rs);
+
+        let mut pieces: Vec<Vec<(i64, i64)>> = region
+            .components()
+            .iter()
+            .map(|c| sorted(cells(c, 12).into_iter().collect()))
+            .collect();
+
+        let mut groups: Vec<Vec<(i64, i64)>> = flood_fill(&cells(&region, 12))
+            .into_iter()
+            .map(|g| sorted(g.into_iter().collect()))
+            .collect();
+        pieces.sort();
+        groups.sort();
+        prop_assert_eq!(pieces, groups);
+    }
+
+    #[test]
+    fn covering_matches_cell_by_cell_membership(rs in rects(4, 12), probe in probe(12, 1)) {
+        let region = Region::from_rects(rs);
+        let inside = cells(&region, 12);
+
+        let expected = (probe.min.x.get()..probe.max.x.get())
+            .all(|x| (probe.min.y.get()..probe.max.y.get()).all(|y| inside.contains(&(x, y))));
+
+        prop_assert_eq!(region.covers_rect(&probe), expected, "{:?}", probe);
+    }
+
+    #[test]
+    fn covering_agrees_with_the_regions_rectangles_covering(rs in rects(3, 12), probe in probe(12, 0)) {
+        let region = Region::from_rects(rs);
+        let pieces: Vec<Rect<Dbu>> = region.rectangles().collect();
+
+        prop_assert_eq!(
             region.covers_rect(&probe),
             probe.covered_by(&pieces),
-            "{probe:?} in {pieces:?}"
+            "{:?} in {:?}", probe, pieces
         );
+    }
+}
+
+proptest! {
+    #![proptest_config(region_config(1000))]
+
+    #[test]
+    fn slices_partition_random_regions(rs in rects(5, 12)) {
+        let region = Region::from_rects(rs);
+
+        assert_partition(&region, &region.horizontal_slices())?;
+        assert_partition(&region, &region.vertical_slices())?;
+    }
+
+    #[test]
+    fn slices_partition_random_regions_with_holes(outer in rects(4, 14), holes in rects(4, 14)) {
+        let region = Region::from_rects(outer).difference(&Region::from_rects(holes));
+
+        assert_partition(&region, &region.horizontal_slices())?;
+        assert_partition(&region, &region.vertical_slices())?;
+    }
+}
+
+proptest! {
+    #![proptest_config(region_config(60))]
+
+    #[test]
+    fn maximal_rectangles_match_an_exhaustive_search(rs in rects(3, 8)) {
+        let region = Region::from_rects(rs);
+
+        let got = sorted(region.max_rectangles().iter().map(key).collect());
+
+        prop_assert_eq!(got, brute_max_rectangles(&cells(&region, 8), 8));
     }
 }
