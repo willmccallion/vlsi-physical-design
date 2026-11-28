@@ -365,14 +365,10 @@ impl Fit {
             let tl = self.find_vl_crossing(self.vl, p3, self.t0, load_delay)?;
             let th = self.find_vl_crossing(self.vh, p3, load_delay, upper)?;
             let mut delay = load_delay - self.vo_delay;
-            let mut slew = (th - tl) / self.slew_derate;
             if delay < 0.0 {
                 delay = elmore;
             }
-            if slew < drvr_slew {
-                slew = drvr_slew;
-            }
-            Ok((delay, slew))
+            Ok((delay, ((th - tl) / self.slew_derate).max(drvr_slew)))
         })();
         fitted.unwrap_or((elmore, drvr_slew))
     }
