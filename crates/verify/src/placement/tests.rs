@@ -136,3 +136,13 @@ fn a_cell_without_height_overlaps_nothing() {
 
     assert_eq!(overlaps_of(&db), []);
 }
+
+#[test]
+fn a_rectangle_ending_on_a_square_boundary_covers_no_square_past_it() {
+    let r = Rect::new(pt(-100, 0), pt(100, 200));
+
+    let squares: Vec<_> = bins_covering(&r, Dbu::new(100)).collect();
+
+    let bin = |column, row| Bin { column, row };
+    assert_eq!(squares, [bin(-1, 0), bin(-1, 1), bin(0, 0), bin(0, 1)]);
+}
