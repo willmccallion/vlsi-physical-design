@@ -429,17 +429,50 @@ fn fork() -> NetlistDB {
 
 const SLOW_CLOCK: &str = "create_clock -name clk -period 0.3 [get_ports clk]\n";
 
+/// The pin `name` of an instance as `cell/pin`, or else of the design.
+fn end_pin(db: &NetlistDB, name: &str) -> PinId {
+    if name.contains('/') {
+        return pin(db, name);
+    }
+    db.pins
+        .iter_enumerated()
+        .map(|(id, _)| id)
+        .find(|&id| db.pin_name(id) == format!("PIN {name}"))
+        .unwrap()
+}
+
+/// What the wires of a session are made of.
+#[derive(Clone, Copy)]
+enum Wires {
+    /// Wires of no resistance or capacitance.
+    Ideal,
+    /// Wires of 3.5 ohms and 0.1 fF a micron.
+    Metal2,
+}
+
 /// Runs `test` on the site of driver pin `driver` along the worst path
-/// into `end` of `db` over `lib`, with wires.
+/// into `end` of `db` over `lib`, with metal wires.
 fn on_site(
+    db: &mut NetlistDB,
+    lib: &Liberty,
+    constraints: &str,
+    pins: (&str, &str),
+    test: impl FnOnce(&mut Resizer<'_, Sta>, &Path, usize),
+) {
+    on_site_with(Wires::Metal2, db, lib, constraints, pins, test);
+}
+
+/// [`on_site`] with `wires`.
+fn on_site_with(
+    wires: Wires,
     db: &mut NetlistDB,
     lib: &Liberty,
     constraints: &str,
     (end, driver): (&str, &str),
     test: impl FnOnce(&mut Resizer<'_, Sta>, &Path, usize),
 ) {
-    let end = pin(db, end);
-    with_wired_session(db, lib, constraints, |resizer| {
+    let end = end_pin(db, end);
+    let on_path = |resizer: &mut Resizer<'_, Sta>| {
         let netlist = resizer.netlist();
         let path = resizer
             .sta()
@@ -451,7 +484,11 @@ fn on_site(
             .position(|p| resizer.db.pin_name(p.pin) == driver)
             .unwrap();
         test(resizer, &path, index);
-    });
+    };
+    match wires {
+        Wires::Ideal => with_timed_session(db, lib, constraints, on_path),
+        Wires::Metal2 => with_wired_session(db, lib, constraints, on_path),
+    }
 }
 
 #[test]
@@ -1154,4 +1191,637 @@ fn the_slews_after_a_removal_are_scaled_by_how_far_the_estimate_is_from_timing()
             found(load)
         );
     });
+}
+
+/// What `try_move` of `kind` makes of the driver `driver` on the worst
+/// path into `end` of `db`, and what `check` finds of the session after.
+fn tried<R>(
+    db: &mut NetlistDB,
+    lib: &Liberty,
+    constraints: &str,
+    pins: (&str, &str),
+    kind: MoveKind,
+    check: impl FnOnce(&mut Resizer<'_, Sta>, bool) -> R,
+) -> R {
+    tried_with(Wires::Metal2, db, lib, constraints, pins, kind, check)
+}
+
+/// [`tried`] with `wires`.
+fn tried_with<R>(
+    wires: Wires,
+    db: &mut NetlistDB,
+    lib: &Liberty,
+    constraints: &str,
+    (end, driver): (&str, &str),
+    kind: MoveKind,
+    check: impl FnOnce(&mut Resizer<'_, Sta>, bool) -> R,
+) -> R {
+    let mut outcome = None;
+    let mut check = Some(check);
+    on_site_with(
+        wires,
+        db,
+        lib,
+        constraints,
+        (end, driver),
+        |resizer, path, index| {
+            let mut moves = Moves::new(resizer).unwrap();
+            let moved = moves
+                .try_move(resizer, kind, path, index, Seconds::ZERO)
+                .unwrap();
+            outcome = Some((check.take().unwrap())(resizer, moved));
+        },
+    );
+    outcome.unwrap()
+}
+
+fn master_of(resizer: &Resizer<'_, Sta>, cell: &str) -> String {
+    let cell = resizer.db.cell_id(cell).unwrap();
+    resizer.link.cell(resizer.db, cell).unwrap().1.name.clone()
+}
+
+/// A flop launching through `first` and then `second` buffer cells, with
+/// `extra` flops loading the first's output, into another flop.
+fn two_buffers(first: &str, second: &str, extra: usize) -> NetlistDB {
+    let mut components = format!(
+        "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n- c1 {first} + PLACED ( 82000 2800 ) N ;\n\
+         - b1 {second} + PLACED ( 162000 2800 ) N ;\n- f2 DFF_X1 + PLACED ( 322000 2800 ) N ;\n"
+    );
+    let mut clock = String::from("- clk ( PIN clk ) ( f1 CK ) ( f2 CK )");
+    let mut side = String::new();
+    for i in 0..extra {
+        writeln!(
+            components,
+            "- x{i} DFF_X1 + PLACED ( 162000 {} ) N ;",
+            20_000 + 20_000 * i
+        )
+        .unwrap();
+        write!(clock, " ( x{i} CK )").unwrap();
+        write!(side, " ( x{i} D )").unwrap();
+    }
+    let nets = format!(
+        "{clock} ;\n- n0 ( f1 Q ) ( c1 A ) ;\n- n1 ( c1 Z ) ( b1 A ){side} ;\n- n2 ( b1 Z ) ( f2 D ) ;\n"
+    );
+    design(&def_text(
+        "two",
+        &DefSections {
+            components: &components,
+            nets: &nets,
+            inputs: &["clk"],
+            outputs: &[],
+        },
+    ))
+}
+
+const TIGHT_CLOCK: &str = "create_clock -name clk -period 0.2 [get_ports clk]\n";
+
+#[test]
+fn a_buffer_behind_a_lone_stronger_buffer_takes_its_size() {
+    let mut db = two_buffers("CLKBUF_X3", "BUF_X1", 0);
+    let lib = cells(&clock_cells_source());
+
+    let (moved, master) = tried(
+        &mut db,
+        &lib,
+        TIGHT_CLOCK,
+        ("f2/D", "b1/Z"),
+        MoveKind::SizeUpMatch,
+        |resizer, moved| (moved, master_of(resizer, "b1")),
+    );
+
+    assert!(moved);
+    assert_eq!(master, "CLKBUF_X3");
+}
+
+/// Whether `try_move` of `SizeUpMatch` on the second buffer of
+/// [`two_buffers`] changes anything, and what it is then.
+fn matched_buffer(first: &str, second: &str, extra: usize, constraints: &str) -> (bool, String) {
+    let mut db = two_buffers(first, second, extra);
+    let lib = cells(&clock_cells_source());
+
+    tried(
+        &mut db,
+        &lib,
+        constraints,
+        ("f2/D", "b1/Z"),
+        MoveKind::SizeUpMatch,
+        |resizer, moved| (moved, master_of(resizer, "b1")),
+    )
+}
+
+#[test]
+fn a_buffer_behind_a_driver_with_other_loads_keeps_its_size() {
+    assert_eq!(
+        matched_buffer("CLKBUF_X3", "BUF_X1", 1, TIGHT_CLOCK),
+        (false, "BUF_X1".to_string())
+    );
+}
+
+#[test]
+fn a_buffer_stronger_than_its_driver_keeps_its_size() {
+    assert_eq!(
+        matched_buffer("BUF_X1", "CLKBUF_X3", 0, TIGHT_CLOCK),
+        (false, "CLKBUF_X3".to_string())
+    );
+}
+
+#[test]
+fn a_buffer_the_size_of_its_driver_keeps_its_size() {
+    assert_eq!(
+        matched_buffer("BUF_X1", "BUF_X1", 0, TIGHT_CLOCK),
+        (false, "BUF_X1".to_string())
+    );
+}
+
+#[test]
+fn a_buffer_is_not_sized_up_to_a_size_that_breaks_its_driver_s_load_limit() {
+    let constraints = format!("{TIGHT_CLOCK}set_max_capacitance 1.0 [current_design]\n");
+
+    assert_eq!(
+        matched_buffer("CLKBUF_X3", "BUF_X1", 0, &constraints),
+        (false, "BUF_X1".to_string())
+    );
+}
+
+/// An AND gate `name` whose `A` arc delays `slow` and `B` arc `fast`
+/// nanoseconds, kept from swapping where `dont_touch`.
+fn and_with_arcs(name: &str, slow: f64, fast: f64, dont_touch: bool) -> String {
+    let arc = |pin: &str, delay: f64| {
+        format!(
+            "timing () {{ related_pin : \"{pin}\" ; timing_sense : positive_unate ;
+               cell_rise (scalar) {{ values (\"{delay}\") ; }}
+               cell_fall (scalar) {{ values (\"{delay}\") ; }}
+               rise_transition (scalar) {{ values (\"0.02\") ; }}
+               fall_transition (scalar) {{ values (\"0.02\") ; }} }}"
+        )
+    };
+    format!(
+        "cell ({name}) {{ area : 0.8 ; dont_touch : {dont_touch} ;
+           pin (A) {{ direction : input ; capacitance : 0.97 ; }}
+           pin (B) {{ direction : input ; capacitance : 0.97 ; }}
+           pin (Z) {{ direction : output ; function : \"(A & B)\" ; max_capacitance : 60.0 ;
+             {} {} }} }}\n",
+        arc("A", slow),
+        arc("B", fast)
+    )
+}
+
+/// Flop `f1` into the slow pin `A` of gate `g1` and flop `f3` into its
+/// fast pin `B`, `g1` into flop `f2`.
+fn gate_with_a_slow_pin(master: &str) -> NetlistDB {
+    let components = format!(
+        "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n- f3 DFF_X1 + PLACED ( 2000 20000 ) N ;\n\
+         - g1 {master} + PLACED ( 82000 2800 ) N ;\n- f2 DFF_X1 + PLACED ( 162000 2800 ) N ;\n"
+    );
+    let nets = "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ( f3 CK ) ;\n\
+        - n0 ( f1 Q ) ( g1 A ) ;\n- n1 ( f3 Q ) ( g1 B ) ;\n- n2 ( g1 Z ) ( f2 D ) ;\n";
+    design_with_copies(
+        &def_text(
+            "swap",
+            &DefSections {
+                components: &components,
+                nets,
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ),
+        &[("AND2_X1", master)],
+    )
+}
+
+/// Tries `SwapPins` twice on gate `g1` of [`gate_with_a_slow_pin`], and
+/// says whether each swapped and which of the inputs the flop `f1` ends on.
+fn swapped_gate(dont_touch: bool) -> (bool, bool, String) {
+    let mut db = gate_with_a_slow_pin("ANDS");
+    let lib = cells_with(&and_with_arcs("ANDS", 0.30, 0.05, dont_touch));
+    let b = pin(&db, "g1/B");
+    let f1_net = db.pins[pin(&db, "f1/Q")].net;
+
+    let (first, second, f1_on_b) = {
+        let mut ran = None;
+        on_site(
+            &mut db,
+            &lib,
+            TIGHT_CLOCK,
+            ("f2/D", "g1/Z"),
+            |resizer, path, index| {
+                let mut moves = Moves::new(resizer).unwrap();
+                let first = moves
+                    .try_move(resizer, MoveKind::SwapPins, path, index, Seconds::ZERO)
+                    .unwrap();
+                let second = moves
+                    .try_move(resizer, MoveKind::SwapPins, path, index, Seconds::ZERO)
+                    .unwrap();
+                ran = Some((first, second, resizer.db.pins[b].net == f1_net));
+            },
+        );
+        ran.unwrap()
+    };
+    (first, second, if f1_on_b { "B" } else { "A" }.to_string())
+}
+
+#[test]
+fn the_critical_input_moves_to_a_faster_equivalent_pin_once() {
+    assert_eq!(swapped_gate(false), (true, false, "B".to_string()));
+}
+
+#[test]
+fn a_gate_the_library_protects_keeps_its_pins() {
+    assert_eq!(swapped_gate(true), (false, false, "A".to_string()));
+}
+
+/// Gate `g1` of `master` fed by flops `f1` and `f3`, driving `count`
+/// flops `x0`, `x1`, ... down a column.
+fn gate_with_loads(master: &str, count: usize) -> NetlistDB {
+    let mut components = format!(
+        "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n- f3 DFF_X1 + PLACED ( 2000 20000 ) N ;\n\
+         - g1 {master} + PLACED ( 82000 2800 ) N ;\n"
+    );
+    let mut clock = String::from("- clk ( PIN clk ) ( f1 CK ) ( f3 CK )");
+    let mut fanout = String::from("- n2 ( g1 Z )");
+    for i in 0..count {
+        writeln!(
+            components,
+            "- x{i} DFF_X1 + PLACED ( 162000 {} ) N ;",
+            2800 + 20_000 * i
+        )
+        .unwrap();
+        write!(clock, " ( x{i} CK )").unwrap();
+        write!(fanout, " ( x{i} D )").unwrap();
+    }
+    let nets =
+        format!("{clock} ;\n- n0 ( f1 Q ) ( g1 A ) ;\n- n1 ( f3 Q ) ( g1 B ) ;\n{fanout} ;\n");
+    design(&def_text(
+        "loads",
+        &DefSections {
+            components: &components,
+            nets: &nets,
+            inputs: &["clk"],
+            outputs: &[],
+        },
+    ))
+}
+
+/// Flop `f1` driving `count` flops `x0`, `x1`, ... down a column.
+fn flop_with_loads(count: usize) -> NetlistDB {
+    let mut components = String::from("- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n");
+    let mut clock = String::from("- clk ( PIN clk ) ( f1 CK )");
+    let mut fanout = String::from("- n0 ( f1 Q )");
+    for i in 0..count {
+        writeln!(
+            components,
+            "- x{i} DFF_X1 + PLACED ( 162000 {} ) N ;",
+            2800 + 20_000 * i
+        )
+        .unwrap();
+        write!(clock, " ( x{i} CK )").unwrap();
+        write!(fanout, " ( x{i} D )").unwrap();
+    }
+    let nets = format!("{clock} ;\n{fanout} ;\n");
+    design(&def_text(
+        "flop",
+        &DefSections {
+            components: &components,
+            nets: &nets,
+            inputs: &["clk"],
+            outputs: &[],
+        },
+    ))
+}
+
+/// The pin of `cell`'s port `port`.
+fn pin_of(resizer: &Resizer<'_, Sta>, cell: CellId, port: &str) -> PinId {
+    resizer.db.cells[cell]
+        .pins
+        .iter()
+        .copied()
+        .find(|&p| resizer.db.pin_name(p).ends_with(&format!("/{port}")))
+        .unwrap()
+}
+
+#[test]
+fn a_gate_of_many_loads_is_cloned_to_take_half_of_them() {
+    let mut db = gate_with_loads("AND2_X1", 10);
+    let lib = cells(&clock_cells_source());
+    let (z, a, b) = (pin(&db, "g1/Z"), pin(&db, "g1/A"), pin(&db, "g1/B"));
+    let (q, other_q) = (pin(&db, "f1/Q"), pin(&db, "f3/Q"));
+    let cells_before = db.cells.len();
+
+    on_site(
+        &mut db,
+        &lib,
+        TIGHT_CLOCK,
+        ("x0/D", "g1/Z"),
+        |resizer, path, index| {
+            let load_before = resizer.load_cap(q);
+            let mut moves = Moves::new(resizer).unwrap();
+
+            let moved = moves
+                .try_move(resizer, MoveKind::Clone, path, index, Seconds::ZERO)
+                .unwrap();
+
+            let clone = CellId::new(cells_before);
+            let (clone_a, clone_b, clone_z) = (
+                pin_of(resizer, clone, "A"),
+                pin_of(resizer, clone, "B"),
+                pin_of(resizer, clone, "Z"),
+            );
+            assert!(moved);
+            assert_eq!(resizer.db.cells.len(), cells_before + 1);
+            assert_eq!((resizer.fanout(z), resizer.fanout(clone_z)), (5, 5));
+            assert_eq!(resizer.db.pins[clone_a].net, resizer.db.pins[a].net);
+            assert_eq!(resizer.db.pins[clone_b].net, resizer.db.pins[b].net);
+            assert_eq!((resizer.fanout(q), resizer.fanout(other_q)), (2, 2));
+            // The clone's input adds its capacitance to the net's driver, 0.97 fF.
+            assert!(resizer.load_cap(q) - load_before >= Farads::new(0.97e-15));
+        },
+    );
+}
+
+#[test]
+fn a_gate_of_eight_loads_is_left_alone() {
+    let mut db = gate_with_loads("AND2_X1", 8);
+    let lib = cells(&clock_cells_source());
+    let cells_before = db.cells.len();
+
+    tried(
+        &mut db,
+        &lib,
+        TIGHT_CLOCK,
+        ("x0/D", "g1/Z"),
+        MoveKind::Clone,
+        |resizer, moved| {
+            assert!(!moved);
+            assert_eq!(resizer.db.cells.len(), cells_before);
+        },
+    );
+}
+
+#[test]
+fn a_flop_of_many_loads_is_not_cloned() {
+    let mut db = flop_with_loads(10);
+    let lib = cells(&clock_cells_source());
+    let cells_before = db.cells.len();
+
+    tried(
+        &mut db,
+        &lib,
+        TIGHT_CLOCK,
+        ("x0/D", "f1/Q"),
+        MoveKind::Clone,
+        |resizer, moved| {
+            assert!(!moved);
+            assert_eq!(resizer.db.cells.len(), cells_before);
+        },
+    );
+}
+
+/// Flop `f1` driving `count` flops `x0`, `x1`, ... `x` database units
+/// along, spread down the die 30 000 units apart.
+fn flop_with_spread_loads(count: usize, x: usize) -> NetlistDB {
+    let mut components = String::from("- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n");
+    let mut clock = String::from("- clk ( PIN clk ) ( f1 CK )");
+    let mut fanout = String::from("- n0 ( f1 Q )");
+    for i in 0..count {
+        writeln!(
+            components,
+            "- x{i} DFF_X1 + PLACED ( {x} {} ) N ;",
+            2800 + 30_000 * i % 700_000
+        )
+        .unwrap();
+        write!(clock, " ( x{i} CK )").unwrap();
+        write!(fanout, " ( x{i} D )").unwrap();
+    }
+    let nets = format!("{clock} ;\n{fanout} ;\n");
+    design(&def_text(
+        "spread",
+        &DefSections {
+            components: &components,
+            nets: &nets,
+            inputs: &["clk"],
+            outputs: &[],
+        },
+    ))
+}
+
+/// What `Buffer` makes of flop `f1` driving `count` flops `x` database
+/// units away: whether it moved, and the cells added.
+fn buffered_flop(count: usize, x: usize) -> (bool, usize) {
+    let mut db = flop_with_spread_loads(count, x);
+    let lib = cells(&clock_cells_source());
+    let before = db.cells.len();
+    let moved = tried(
+        &mut db,
+        &lib,
+        TIGHT_CLOCK,
+        ("x0/D", "f1/Q"),
+        MoveKind::Buffer,
+        |_, moved| moved,
+    );
+    (moved, db.cells.len() - before)
+}
+
+#[test]
+fn a_net_of_two_far_loads_is_rebuffered() {
+    let (moved, added) = buffered_flop(2, 700_000);
+
+    assert!(moved);
+    assert!(added > 0);
+}
+
+#[test]
+fn a_net_of_one_load_is_not_rebuffered_however_far_it_is() {
+    assert_eq!(buffered_flop(1, 700_000), (false, 0));
+}
+
+#[test]
+fn a_net_of_twenty_loads_is_not_rebuffered() {
+    assert_eq!(buffered_flop(20, 400_000), (false, 0));
+}
+
+/// What the buffer `b1` of [`buffer_to_remove`] drives.
+#[derive(Clone, Copy)]
+enum BufferLoads {
+    /// This many flops.
+    Flops(usize),
+    /// The design's output port `out`.
+    Port,
+}
+
+/// Flop `f1` driving buffer `b1` and `siblings` flops `p0`, `p1`, ...;
+/// the buffer drives `loads`.
+fn buffer_to_remove(siblings: usize, loads: BufferLoads) -> NetlistDB {
+    let mut components = String::from(
+        "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n- b1 BUF_X1 + PLACED ( 82000 2800 ) N ;\n",
+    );
+    let mut clock = String::from("- clk ( PIN clk ) ( f1 CK )");
+    let mut upstream = String::from("- n0 ( f1 Q ) ( b1 A )");
+    for i in 0..siblings {
+        writeln!(
+            components,
+            "- p{i} DFF_X1 + PLACED ( 82000 {} ) N ;",
+            20_000 + 20_000 * i
+        )
+        .unwrap();
+        write!(clock, " ( p{i} CK )").unwrap();
+        write!(upstream, " ( p{i} D )").unwrap();
+    }
+    let mut downstream = String::from("- n1 ( b1 Z )");
+    let outputs: &[&str] = match loads {
+        BufferLoads::Flops(count) => {
+            for i in 0..count {
+                writeln!(
+                    components,
+                    "- s{i} DFF_X1 + PLACED ( 162000 {} ) N ;",
+                    2800 + 20_000 * i
+                )
+                .unwrap();
+                write!(clock, " ( s{i} CK )").unwrap();
+                write!(downstream, " ( s{i} D )").unwrap();
+            }
+            &[]
+        }
+        BufferLoads::Port => {
+            downstream = String::from("- out ( b1 Z )");
+            &["out"]
+        }
+    };
+    let nets = format!("{clock} ;\n{upstream} ;\n{downstream} ;\n");
+    design(&def_text(
+        "unbuffer",
+        &DefSections {
+            components: &components,
+            nets: &nets,
+            inputs: &["clk"],
+            outputs,
+        },
+    ))
+}
+
+/// Whether `Unbuffer` takes `b1` out of `db` under `constraints`, the end
+/// of the path being `end`.
+fn unbuffered(db: &mut NetlistDB, constraints: &str, end: &str) -> bool {
+    unbuffered_over(db, &cells(&clock_cells_source()), constraints, end)
+}
+
+/// [`unbuffered`] over the cells of `lib`, with ideal wires.
+fn unbuffered_over(db: &mut NetlistDB, lib: &Liberty, constraints: &str, end: &str) -> bool {
+    let pins = (end, "b1/Z");
+    tried_with(
+        Wires::Ideal,
+        db,
+        lib,
+        constraints,
+        pins,
+        MoveKind::Unbuffer,
+        |_, moved| moved,
+    )
+}
+
+const ONE_NS: &str = "create_clock -name clk -period 1 [get_ports clk]\n";
+
+/// Whether `Unbuffer` takes `b1` out of a design where it and `siblings`
+/// flops load `f1` and it drives `loads` flops, under a clock of 1 ns and
+/// `more`, over a library whose pins have a fanout load of 1.
+fn unbuffered_among_flops(siblings: usize, loads: usize, more: &str) -> bool {
+    let mut db = buffer_to_remove(siblings, BufferLoads::Flops(loads));
+    let source = clock_cells_source().replacen(
+        "default_max_transition : 0.2 ;",
+        "default_max_transition : 0.2 ; default_fanout_load : 1.0 ;",
+        1,
+    );
+
+    unbuffered_over(&mut db, &cells(&source), &format!("{ONE_NS}{more}"), "s0/D")
+}
+
+#[test]
+fn a_buffer_is_taken_out_while_its_driver_stays_within_ten_loads() {
+    assert!(unbuffered_among_flops(0, 1, ""));
+    assert!(unbuffered_among_flops(5, 5, ""));
+}
+
+#[test]
+fn a_buffer_is_kept_where_taking_it_out_gives_its_driver_eleven_loads() {
+    assert!(!unbuffered_among_flops(6, 5, ""));
+    assert!(!unbuffered_among_flops(5, 6, ""));
+}
+
+#[test]
+fn a_set_fanout_limit_replaces_the_default_of_ten_for_the_buffer_s_driver() {
+    let limit = |max: usize| format!("set_max_fanout {max} [current_design]\n");
+
+    assert!(unbuffered_among_flops(5, 5, &limit(10)));
+    assert!(!unbuffered_among_flops(5, 5, &limit(9)));
+    assert!(unbuffered_among_flops(6, 5, &limit(11)));
+    assert!(!unbuffered_among_flops(6, 5, &limit(10)));
+}
+
+const PORT_LOAD: &str =
+    "set_load 0.5 [get_ports out]\nset_output_delay 0.1 -clock clk [get_ports out]\n";
+
+/// Whether `Unbuffer` takes `b1` out of a design where it drives the port
+/// `out` and `siblings` flops load `f1` with it, under a clock of 1 ns, a
+/// port load of 0.5 fF and `more`.
+fn unbuffered_before_a_port(siblings: usize, more: &str) -> bool {
+    let mut db = buffer_to_remove(siblings, BufferLoads::Port);
+
+    unbuffered(&mut db, &format!("{ONE_NS}{PORT_LOAD}{more}"), "out")
+}
+
+/// The loads of `f1` and of `b1` with the buffer in, and the capacitance
+/// of the buffer's input.
+fn loads_beside_a_port(siblings: usize) -> (Farads, Farads, Farads) {
+    let mut db = buffer_to_remove(siblings, BufferLoads::Port);
+    let lib = cells(&clock_cells_source());
+    let (q, z) = (pin(&db, "f1/Q"), pin(&db, "b1/Z"));
+    let mut loads = None;
+    with_timed_session(&mut db, &lib, &format!("{ONE_NS}{PORT_LOAD}"), |resizer| {
+        let buffer = resizer.link.liberty.cell_id("BUF_X1").unwrap();
+        let cell = resizer.link.liberty.cell(buffer);
+        let input = cell.ports[cell.port("A").unwrap()].capacitance();
+        loads = Some((resizer.load_cap(q), resizer.load_cap(z), input));
+    });
+    loads.unwrap()
+}
+
+#[test]
+fn a_buffer_stays_when_its_driver_would_end_over_its_load_limit() {
+    let (driver, buffer, input) = loads_beside_a_port(0);
+    let after = driver + buffer - input;
+
+    let at_the_limit = |limit: Farads| {
+        format!(
+            "set_max_capacitance {} [current_design]\n",
+            limit.get() * 1e15
+        )
+    };
+
+    assert!(unbuffered_before_a_port(
+        0,
+        &at_the_limit(after + input * 0.5)
+    ));
+    assert!(!unbuffered_before_a_port(
+        0,
+        &at_the_limit(after - input * 0.5)
+    ));
+}
+
+#[test]
+fn a_buffer_stays_when_its_driver_already_over_its_limit_would_stay_over_it() {
+    let (driver, _, _) = loads_beside_a_port(2);
+    let limit = format!(
+        "set_max_capacitance {} [current_design]\n",
+        driver.get() * 1e15 * 0.5
+    );
+
+    assert!(unbuffered_before_a_port(2, ""));
+    assert!(!unbuffered_before_a_port(2, &limit));
+}
+
+#[test]
+fn a_load_limit_of_zero_limits_nothing() {
+    assert!(unbuffered_before_a_port(
+        2,
+        "set_max_capacitance 0.0 [current_design]\n"
+    ));
 }
