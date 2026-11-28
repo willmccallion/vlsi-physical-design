@@ -101,9 +101,8 @@ impl LayerCheck<'_> {
         if same_owner && self.sufficient_metal(r1, r2, marker) {
             return;
         }
-        let probe = bloat_flat(marker);
         let routed =
-            self.metal.has_route_in(r1.owner, &probe) || self.metal.has_route_in(r2.owner, &probe);
+            self.metal.has_route_in(r1.owner, marker) || self.metal.has_route_in(r2.owner, marker);
         let violation = if same_owner {
             Violation::NonSufficientMetal
         } else {
@@ -178,8 +177,7 @@ impl LayerCheck<'_> {
         }
         let exposed = Region::from_rects([*marker]).difference(&covered);
         for rect in exposed.max_rectangles() {
-            let part = GcRect { rect, ..*blockage };
-            self.check_short(wire, &part, &rect, found);
+            self.check_short(wire, blockage, &rect, found);
         }
     }
 
@@ -333,9 +331,6 @@ impl LayerCheck<'_> {
         let Some(near) = reach.intersection(&rect.rect) else {
             return false;
         };
-        if near.width() <= Dbu::ZERO || near.height() <= Dbu::ZERO {
-            return false;
-        }
         !self
             .metal
             .fixed_within(rect.owner, &near)
@@ -367,18 +362,4 @@ fn diagonal_reaches(rect: &Rect<Dbu>, length: Dbu) -> bool {
         i128::from(length.get()),
     );
     w * w + h * h >= l * l
-}
-
-/// `rect` widened by one unit along each axis it has no extent in.
-fn bloat_flat(rect: &Rect<Dbu>) -> Rect<Dbu> {
-    let mut r = *rect;
-    if r.width() == Dbu::ZERO {
-        r.min.x -= Dbu::new(1);
-        r.max.x += Dbu::new(1);
-    }
-    if r.height() == Dbu::ZERO {
-        r.min.y -= Dbu::new(1);
-        r.max.y += Dbu::new(1);
-    }
-    r
 }
