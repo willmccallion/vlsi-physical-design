@@ -228,7 +228,9 @@ fn stacked_on_ff0(text: &str) -> String {
 /// Synthesizes the trees of the generated design `text` with no wire
 /// length limit and checks that every flop is clocked from the root buffer
 /// through clock buffers alone; the sinks the trees reach.
-fn assert_every_flop_is_clocked_through_the_tree(text: &str) -> usize {
+/// The design of DEF `text` over the clock fixtures, with its clock trees
+/// synthesized, and how many sinks they reach.
+fn synthesized_from(text: &str) -> (NetlistDB, usize) {
     let (db, lib, constraints) = load(1, 1, false);
     let mut db = def::parse_str(text, Path::new("grid.def"), db.library).unwrap();
     let link = Link::new(&db, &lib, &[]).unwrap();
@@ -242,8 +244,12 @@ fn assert_every_flop_is_clocked_through_the_tree(text: &str) -> usize {
         max_wire_length: None,
         options: CtsOptions::default(),
     };
+    let sinks = synthesize(&mut db, &input).unwrap().summary.sinks;
+    (db, sinks)
+}
 
-    let trees = synthesize(&mut db, &input).unwrap();
+fn assert_every_flop_is_clocked_through_the_tree(text: &str) -> usize {
+    let (db, sinks) = synthesized_from(text);
 
     for pin in flop_clock_pins(&db) {
         let path = path_to_port(&db, pin);
@@ -254,7 +260,7 @@ fn assert_every_flop_is_clocked_through_the_tree(text: &str) -> usize {
             db.pin_name(pin)
         );
     }
-    trees.summary.sinks
+    sinks
 }
 
 #[test]
@@ -284,6 +290,52 @@ fn flop_places() -> impl Strategy<Value = Vec<(usize, usize)>> {
     })
 }
 
+/// Where each flop of a generated design stands.
+type FlopPlaces = Vec<(usize, usize)>;
+
+/// [`flop_places`] and the same places in another order.
+fn reordered_flop_places() -> impl Strategy<Value = (FlopPlaces, FlopPlaces)> {
+    flop_places().prop_flat_map(|places| (Just(places.clone()), Just(places).prop_shuffle()))
+}
+
+/// A clock tree told apart from its sinks' names.
+#[derive(Debug, PartialEq, Eq)]
+struct TreeShape {
+    /// Each buffer's name, master and spot, sorted.
+    buffers: Vec<(String, String, Point<Dbu>)>,
+    /// Each flop's spot with the buffers from it to the port, sorted.
+    sinks: Vec<(Point<Dbu>, Vec<String>)>,
+}
+
+impl TreeShape {
+    fn of(db: &NetlistDB) -> Self {
+        let mut buffers: Vec<_> = db
+            .cells
+            .iter()
+            .filter(|c| c.name.starts_with("clkbuf_"))
+            .map(|c| {
+                (
+                    c.name.clone(),
+                    db.library.cell_macro(c.macro_id).name.clone(),
+                    c.location,
+                )
+            })
+            .collect();
+        let mut sinks: Vec<_> = flop_clock_pins(db)
+            .into_iter()
+            .map(|pin| {
+                let PinOwner::Cell { cell, .. } = db.pins[pin].owner else {
+                    unreachable!("a flop's clock pin is a cell's")
+                };
+                (db.cells[cell].location, path_to_port(db, pin))
+            })
+            .collect();
+        buffers.sort();
+        sinks.sort();
+        Self { buffers, sinks }
+    }
+}
+
 fn property_config() -> ProptestConfig {
     ProptestConfig {
         cases: 24,
@@ -301,6 +353,15 @@ proptest! {
         let sinks = assert_every_flop_is_clocked_through_the_tree(&flops_at(&places, false));
 
         prop_assert_eq!(sinks, places.len());
+    }
+
+    #[test]
+    fn the_order_of_the_sinks_does_not_change_the_tree((places, reordered) in reordered_flop_places()) {
+        let (db, _) = synthesized_from(&flops_at(&places, false));
+
+        let (reordered_db, _) = synthesized_from(&flops_at(&reordered, false));
+
+        prop_assert_eq!(TreeShape::of(&reordered_db), TreeShape::of(&db));
     }
 }
 

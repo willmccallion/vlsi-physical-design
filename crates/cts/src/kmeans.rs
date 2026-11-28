@@ -9,7 +9,7 @@
 //! among equally cheap ones the simplex's own choice, so the simplex is
 //! run as LEMON runs it.
 
-use pare_common::convert::SaturatingFrom;
+use pare_common::convert::{NearestFrom, SaturatingFrom};
 use pare_common::network_simplex::{Arc, min_cost_flow};
 
 /// The farthest a sink may be from a mean and still be assigned to it, as
@@ -28,6 +28,24 @@ impl SinkPoint {
     pub(crate) const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+}
+
+/// The mean of `points`, none of none, summed in double precision in sorted
+/// order so that it does not depend on the order the points come in.
+// NOTE: HTreeBuilder::preSinkClustering and CtsClustering::iterKmeans sum
+// floats in sink order, so the order OpenDB lists the sinks in moves the
+// means by a rounding; PARE's means are the same for any order.
+pub(crate) fn centroid(points: impl IntoIterator<Item = SinkPoint>) -> Option<(f64, f64)> {
+    let mut sorted: Vec<SinkPoint> = points.into_iter().collect();
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    let (x, y) = sorted.iter().fold((0.0, 0.0), |(x, y), p| {
+        (x + f64::from(p.x), y + f64::from(p.y))
+    });
+    let n = sorted.len() as f64;
+    Some((x / n, y / n))
 }
 
 /// A sink to cluster, in the tree's length units.
@@ -112,16 +130,11 @@ impl Clustering {
             }
             let mut delta = 0.0_f32;
             for (mean, members) in means.iter_mut().zip(&clusters) {
-                if members.is_empty() {
+                let Some((x, y)) = centroid(members.iter().map(|&m| self.sinks[m].at)) else {
                     continue;
-                }
-                let (mut sum_x, mut sum_y) = (0.0_f32, 0.0_f32);
-                for &m in members {
-                    sum_x += self.sinks[m].at.x;
-                    sum_y += self.sinks[m].at.y;
-                }
+                };
                 let previous = *mean;
-                *mean = SinkPoint::new(sum_x / members.len() as f32, sum_y / members.len() as f32);
+                *mean = SinkPoint::new(f32::nearest_from(x), f32::nearest_from(y));
                 delta += (previous.x - mean.x).abs() + (previous.y - mean.y).abs();
             }
             self.clusters = clusters;

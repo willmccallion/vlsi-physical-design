@@ -40,7 +40,7 @@ cell clkbuf_3_6_0_clk_n_regs CLKBUF_X3 249065 244664 N
 cell clkbuf_3_7_0_clk_n_regs CLKBUF_X3 305065 244664 N
 cell clkbuf_4_0__f_clk_n_regs CLKBUF_X3 40930 78517 N
 cell clkbuf_4_1__f_clk_n_regs CLKBUF_X3 40864 130103 N
-cell clkbuf_4_2__f_clk_n_regs CLKBUF_X3 135468 76552 N
+cell clkbuf_4_2__f_clk_n_regs CLKBUF_X3 135468 76551 N
 cell clkbuf_4_3__f_clk_n_regs CLKBUF_X3 135484 130536 N
 cell clkbuf_4_4__f_clk_n_regs CLKBUF_X3 39553 223823 N
 cell clkbuf_4_5__f_clk_n_regs CLKBUF_X3 39061 275960 N
