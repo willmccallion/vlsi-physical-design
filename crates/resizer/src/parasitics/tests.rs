@@ -133,9 +133,9 @@ fn a_network_with_a_loop_is_reduced_along_a_spanning_tree() {
     };
     let corners = [
         at(3000, 3000),
-        at(43000, 3000),
-        at(43000, 203000),
-        at(3000, 203000),
+        at(43_000, 3000),
+        at(43_000, 203_000),
+        at(3000, 203_000),
     ];
     let location = |name: &str, corner: RoutePoint| PinGridLocation {
         pin: pin(&db, name),
