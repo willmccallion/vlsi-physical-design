@@ -834,7 +834,7 @@ impl<'a, T: Timing> Resizer<'a, T> {
     pub(crate) fn is_tristate_driver(&self, driver: PinId) -> bool {
         self.netlist()
             .lib_port(driver)
-            .is_some_and(|p| p.three_state.is_some())
+            .is_some_and(|p| p.tristate_enable.is_some())
     }
 
     /// Whether an instance may be resized or removed: a plain standard
