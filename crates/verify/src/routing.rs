@@ -210,3 +210,6 @@ fn wiring_stats(db: &NetlistDB) -> WiringStats {
     }
     stats
 }
+
+#[cfg(test)]
+mod tests;
