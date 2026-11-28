@@ -1,6 +1,8 @@
 //! Helpers for the workspace's tests, built only with the `testing`
 //! feature.
 
+pub mod designs;
+
 use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Once;

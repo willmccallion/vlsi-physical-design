@@ -11,6 +11,7 @@ exclude_globs = [
     "crates/router/src/detailed/trace.rs", # debugging logs of chosen nets
     "crates/common/src/memory.rs",         # resident memory, for log lines and the report
     "crates/common/src/testing.rs",        # helpers for tests
+    "crates/common/src/testing/**",        # designs for tests
 ]
 exclude_re = [
     "<impl (\\w+::)*Debug for ",           # debug printing

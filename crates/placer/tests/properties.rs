@@ -5,7 +5,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-mod common;
+use pare_common::testing::designs;
 
 use pare_placer::legalize::opendp::detailed_placement;
 use pare_verify::placement::placement_violations;
@@ -62,7 +62,7 @@ proptest! {
         placement in placement(),
     ) {
         let Placement { starts, blocks } = placement;
-        let mut db = common::parse(&common::placed_ring_text(&starts, &blocks));
+        let mut db = designs::parse(&designs::placed_ring_text(&starts, &blocks));
 
         let _ = detailed_placement(&mut db).unwrap();
 
