@@ -1541,7 +1541,10 @@ fn ff(load: Farads) -> String {
 
 #[test]
 fn the_load_that_gives_a_target_slew_over_every_arc_and_slew_of_the_clock_cells_is_as_found() {
-    let lib = cells_with(SLOWSLEW_CELL);
+    let lib = cells_with(&format!(
+        "{SLOWSLEW_CELL}\n{}",
+        scalar_buffer("FLATSLEW", 0.1)
+    ));
     let mut lines = String::new();
     for (id, cell) in lib.cells.iter_enumerated() {
         let _ = writeln!(
