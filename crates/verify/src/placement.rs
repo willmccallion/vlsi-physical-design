@@ -248,3 +248,6 @@ fn bins_covering(r: &Rect<Dbu>, side: Dbu) -> impl Iterator<Item = Bin> {
     squares(r.min.x, r.max.x)
         .flat_map(move |column| rows.clone().map(move |row| Bin { column, row }))
 }
+
+#[cfg(test)]
+mod tests;
