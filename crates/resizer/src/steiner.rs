@@ -279,17 +279,10 @@ fn best_steiner_for_node(graph: &Graph, node: usize) -> Candidate {
         for j in (i + 1)..adjacent.len() {
             let p1 = graph.points[adjacent[i]];
             let p2 = graph.points[adjacent[j]];
-            let mut steiner = pt;
-            if p1.x.min(p2.x) > pt.x {
-                steiner.x = p1.x.min(p2.x);
-            } else if p1.x.max(p2.x) < pt.x {
-                steiner.x = p1.x.max(p2.x);
-            }
-            if p1.y.min(p2.y) > pt.y {
-                steiner.y = p1.y.min(p2.y);
-            } else if p1.y.max(p2.y) < pt.y {
-                steiner.y = p1.y.max(p2.y);
-            }
+            let steiner = Point::new(
+                pt.x.clamp(p1.x.min(p2.x), p1.x.max(p2.x)),
+                pt.y.clamp(p1.y.min(p2.y), p1.y.max(p2.y)),
+            );
             let gain = steiner.manhattan(pt);
             if gain > best.gain {
                 best = Candidate {
