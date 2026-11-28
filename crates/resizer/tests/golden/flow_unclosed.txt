@@ -1,6 +1,7 @@
 RepairSummary {
     slew_violations: 1,
     cap_violations: 0,
+    fanout_violations: 0,
     length_violations: 0,
     repaired_nets: 1,
     resized: 1,

@@ -5,12 +5,14 @@
 
 mod common;
 
-use common::{Work, at, clock_cells, repaired_in_session};
+use common::{Work, at, cells_counting_fanout, clock_cells, repaired_in_session};
 use pare_common::db::design::NetlistDB;
 use pare_common::geom::dbu::Dbu;
 use pare_common::testing;
 use pare_common::units::Seconds;
-use pare_resizer::{HoldOptions, Repairer, Resizer, SetupOptions, Sta, repair_hold, repair_setup};
+use pare_resizer::{
+    HoldOptions, RepairSummary, Repairer, Resizer, SetupOptions, Sta, repair_hold, repair_setup,
+};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -173,4 +175,50 @@ fn design_repair_splits_long_and_overloaded_nets_as_it_always_has() {
     });
 
     assert_golden("long_and_loaded_nets.txt", &repaired);
+}
+
+/// A buffer the input port drives, loading a flop at each of `places`.
+fn fanout_work(places: &[(usize, usize)]) -> Work {
+    let mut cells = vec![format!("- fan BUF_X1 + PLACED {} ;", at(500, 70))];
+    let mut fanout = String::from("- fo ( fan Z )");
+    for (i, &(c, r)) in places.iter().enumerate() {
+        cells.push(format!("- s{i} DFF_X1 + PLACED {} ;", at(c, r)));
+        let _ = write!(fanout, " ( s{i} D )");
+    }
+    let nets = vec!["- in0 ( PIN in0 ) ( fan A ) ;".to_string(), fanout + " ;"];
+    Work { cells, nets }
+}
+
+/// What design repair reports of `work` under a fanout limit of three, and
+/// how many loads net `fo` has after it.
+fn repaired_under_fanout_limit(work: Work) -> (RepairSummary, usize) {
+    let constraints = "create_clock -name core -period 1.0 [get_ports clk]\n\
+                       set_input_delay 0.1 -clock core [get_ports in0]\n\
+                       set_max_fanout 3 [current_design]\n";
+    let (summary, db) = repaired_in_session(work, constraints, &cells_counting_fanout(), |r| {
+        Repairer::new(r).repair_design().unwrap()
+    });
+    let fo = db.net_id("fo").unwrap();
+    (summary, db.nets[fo].pins.len() - 1)
+}
+
+#[test]
+fn design_repair_splits_a_net_over_its_fanout_limit_under_repeaters() {
+    let places = [(0, 0), (300, 0), (600, 0), (0, 100), (300, 100), (600, 100)];
+
+    let (summary, fo_loads) = repaired_under_fanout_limit(fanout_work(&places));
+
+    assert_eq!(summary.fanout_violations, 1);
+    assert!(summary.inserted >= 2, "{summary:#?}");
+    assert!(fo_loads <= 3, "fo loads {fo_loads}");
+}
+
+#[test]
+fn loads_stacked_within_a_micron_keep_their_fanout_violation() {
+    let places = [(10, 10); 6];
+
+    let (summary, fo_loads) = repaired_under_fanout_limit(fanout_work(&places));
+
+    assert_eq!(summary.fanout_violations, 1);
+    assert_eq!(fo_loads, 6);
 }
