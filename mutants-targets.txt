@@ -1,0 +1,111 @@
+crates/resizer/src/buffers.rs:148:65: replace && with || in BufferRemoval::merge_nets
+crates/resizer/src/dmp.rs:109:21: replace < with <= in fit_gate
+crates/resizer/src/dmp.rs:372:21: replace < with <= in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:647:31: replace - with + in zero_c2
+crates/resizer/src/dmp.rs:647:31: replace - with / in zero_c2
+crates/resizer/src/dmp.rs:647:39: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:647:39: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:767:14: replace + with * in lu_decompose
+crates/resizer/src/dmp.rs:813:34: replace > with >= in find_root
+crates/resizer/src/dmp.rs:819:37: replace * with / in find_root
+crates/resizer/src/dmp.rs:820:33: replace > with >= in find_root
+crates/resizer/src/dmp.rs:834:15: replace < with <= in find_root
+crates/resizer/src/fuzzy.rs:48:7: replace < with <= in less
+crates/resizer/src/fuzzy.rs:55:7: replace < with <= in less_equal
+crates/resizer/src/fuzzy.rs:62:7: replace > with >= in greater
+crates/resizer/src/fuzzy.rs:69:7: replace > with >= in greater_equal
+crates/resizer/src/graph/mod.rs:333:72: replace > with >= in TimingGraph::parasitics_invalid
+crates/resizer/src/graph/mod.rs:430:37: replace < with <= in TimingGraph::grow
+crates/resizer/src/hold.rs:131:36: replace < with <= in repair_hold
+crates/resizer/src/hold.rs:146:32: replace > with >= in repair_hold
+crates/resizer/src/hold.rs:146:49: replace > with >= in repair_hold
+crates/resizer/src/hold.rs:151:36: replace > with >= in repair_hold
+crates/resizer/src/hold.rs:343:32: replace - with / in HoldRepair<'_>::repair_end
+crates/resizer/src/hold.rs:345:53: replace || with && in HoldRepair<'_>::repair_end
+crates/resizer/src/hold.rs:398:23: replace > with >= in HoldRepair<'_>::plan
+crates/resizer/src/hold.rs:398:72: replace > with >= in HoldRepair<'_>::plan
+crates/resizer/src/hold.rs:422:37: replace > with >= in HoldRepair<'_>::try_insert
+crates/resizer/src/hold.rs:430:30: replace < with <= in HoldRepair<'_>::try_insert
+crates/resizer/src/hold.rs:432:19: replace > with >= in HoldRepair<'_>::try_insert
+crates/resizer/src/moves.rs:1061:54: replace > with >= in side_loads_ok
+crates/resizer/src/moves.rs:333:46: replace || with && in Moves::swap_pins
+crates/resizer/src/moves.rs:524:24: replace > with >= in Moves::unbuffer
+crates/resizer/src/moves.rs:635:24: replace > with >= in intrinsic_delay
+crates/resizer/src/moves.rs:784:27: replace || with && in equivalent_pins
+crates/resizer/src/moves.rs:837:50: replace == with != in ports_equivalent
+crates/resizer/src/moves.rs:885:26: replace || with && in swap_candidate
+crates/resizer/src/moves.rs:885:47: replace || with && in swap_candidate
+crates/resizer/src/netlist.rs:448:53: replace && with || in ClockNetwork::find
+crates/resizer/src/parasitics.rs:131:8: delete ! in steiner_over
+crates/resizer/src/parasitics.rs:331:42: replace && with || in NetParasitics::pi_elmore
+crates/resizer/src/rebuffer/area.rs:141:70: replace + with - in Rebuffer::area_options
+crates/resizer/src/rebuffer/area.rs:171:39: replace && with || in Rebuffer::paired_area_options
+crates/resizer/src/rebuffer/area.rs:180:12: delete ! in Rebuffer::paired_area_options
+crates/resizer/src/rebuffer/area.rs:25:62: replace * with + in Rebuffer::buffered_frontier
+crates/resizer/src/rebuffer/area.rs:25:62: replace * with / in Rebuffer::buffered_frontier
+crates/resizer/src/rebuffer/area.rs:67:27: delete - in Rebuffer::recover_area
+crates/resizer/src/rebuffer/area.rs:80:17: replace || with && in Rebuffer::recover_area
+crates/resizer/src/rebuffer/area.rs:80:67: replace > with < in Rebuffer::recover_area
+crates/resizer/src/rebuffer/area.rs:80:67: replace > with == in Rebuffer::recover_area
+crates/resizer/src/rebuffer/area.rs:80:67: replace > with >= in Rebuffer::recover_area
+crates/resizer/src/rebuffer/limits.rs:130:21: replace < with <= in wire_length_limit_by_load_slew
+crates/resizer/src/rebuffer/limits.rs:130:21: replace < with == in wire_length_limit_by_load_slew
+crates/resizer/src/rebuffer/limits.rs:134:15: replace > with >= in wire_length_limit_by_load_slew
+crates/resizer/src/rebuffer/limits.rs:138:15: replace < with <= in wire_length_limit_by_load_slew
+crates/resizer/src/rebuffer/limits.rs:239:29: replace > with >= in outmatched
+crates/resizer/src/rebuffer/limits.rs:28:24: replace > with >= in buffer_size
+crates/resizer/src/rebuffer/limits.rs:340:30: replace > with >= in buffer_max_wire_length
+crates/resizer/src/rebuffer/limits.rs:340:66: replace < with <= in buffer_max_wire_length
+crates/resizer/src/rebuffer/limits.rs:341:20: replace += with *= in buffer_max_wire_length
+crates/resizer/src/rebuffer/limits.rs:341:20: replace += with -= in buffer_max_wire_length
+crates/resizer/src/rebuffer/limits.rs:342:22: replace < with <= in buffer_max_wire_length
+crates/resizer/src/rebuffer/limits.rs:348:26: replace < with <= in buffer_max_wire_length
+crates/resizer/src/rebuffer/limits.rs:71:37: replace * with / in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/limits.rs:75:31: replace > with >= in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/limits.rs:75:68: replace < with <= in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/limits.rs:76:20: replace += with *= in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/limits.rs:76:20: replace += with -= in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/limits.rs:77:18: replace < with <= in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/limits.rs:84:22: replace < with <= in load_limit_by_driver_slew
+crates/resizer/src/rebuffer/mod.rs:346:44: replace / with % in Rebuffer::rebuffer_pin
+crates/resizer/src/rebuffer/mod.rs:346:44: replace / with * in Rebuffer::rebuffer_pin
+crates/resizer/src/rebuffer/timing.rs:236:61: replace > with >= in Rebuffer::buffer_for_timing
+crates/resizer/src/rebuffer/timing.rs:283:58: replace > with >= in Rebuffer::wire_options
+crates/resizer/src/rebuffer/timing.rs:295:28: replace > with == in Rebuffer::wire_options
+crates/resizer/src/rebuffer/timing.rs:295:28: replace > with >= in Rebuffer::wire_options
+crates/resizer/src/rebuffer/timing.rs:296:28: replace > with >= in Rebuffer::wire_options
+crates/resizer/src/rebuffer/timing.rs:438:52: replace + with - in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:448:31: replace + with - in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:625:73: replace - with + in assured_fallback
+crates/resizer/src/repair.rs:325:27: replace > with >= in Repairer<'r, 'a, T>::check_limits
+crates/resizer/src/repair.rs:454:29: replace > with >= in Repairer<'r, 'a, T>::slew_violation
+crates/resizer/src/repair.rs:479:35: replace > with >= in Repairer<'r, 'a, T>::slew_load_cap
+crates/resizer/src/repair.rs:817:37: replace > with >= in Repairer<'r, 'a, T>::split_length
+crates/resizer/src/repair.rs:824:36: replace > with >= in Repairer<'r, 'a, T>::split_length
+crates/resizer/src/resizer.rs:1354:29: replace match guard is_buf_inv with true in Resizer<'a, T>::find_target_cell
+crates/resizer/src/resizer.rs:1359:39: replace - with + in Resizer<'a, T>::find_target_cell
+crates/resizer/src/resizer.rs:1366:45: replace < with <= in Resizer<'a, T>::find_target_cell
+crates/resizer/src/resizer.rs:1367:51: replace < with <= in Resizer<'a, T>::find_target_cell
+crates/resizer/src/resizer.rs:1369:60: replace > with >= in Resizer<'a, T>::find_target_cell
+crates/resizer/src/resizer.rs:1429:16: replace > with >= in Resizer<'a, T>::cap_ok
+crates/resizer/src/resizer.rs:1651:19: replace > with == in arc_target_load
+crates/resizer/src/resizer.rs:1651:19: replace > with >= in arc_target_load
+crates/resizer/src/resizer.rs:1656:31: replace > with >= in arc_target_load
+crates/resizer/src/route_parasitics.rs:123:44: replace / with % in RouteRc::wire
+crates/resizer/src/setup.rs:543:33: replace > with >= in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:621:27: replace + with * in Repair<'_, '_>::last_gasp
+crates/resizer/src/setup.rs:725:21: replace && with || in Repair<'_, '_>::load_delay
+crates/resizer/src/sta/cycles.rs:28:44: replace > with >= in cycle_accounting
+crates/resizer/src/sta/mod.rs:218:30: replace || with && in same_time
+crates/resizer/src/sta/mod.rs:750:29: replace > with == in Sta::worst_slack_path
+crates/resizer/src/sta/mod.rs:750:29: replace > with >= in Sta::worst_slack_path
+crates/resizer/src/sta/requireds.rs:257:48: replace && with || in Sta::cell_check_requireds
+crates/resizer/src/steiner.rs:217:21: replace += with *= in build_spanning_tree
+crates/resizer/src/steiner.rs:283:31: replace > with >= in best_steiner_for_node
+crates/resizer/src/steiner.rs:285:38: replace < with <= in best_steiner_for_node
+crates/resizer/src/steiner.rs:288:31: replace > with >= in best_steiner_for_node
+crates/resizer/src/steiner.rs:290:38: replace < with <= in best_steiner_for_node
+crates/resizer/src/steiner.rs:319:23: replace += with *= in steinerize
+crates/resizer/src/steiner.rs:332:59: replace && with || in steinerize
+crates/resizer/src/steiner.rs:337:50: replace || with && in steinerize
+crates/resizer/src/steiner.rs:414:21: replace + with * in is_valid
