@@ -118,7 +118,7 @@ const LEVEL_CELLS: &str = "\
     cell (TBUF) { area : 0.8 ; \
       pin (A) { direction : input ; capacitance : 1.0 ; } \
       pin (B) { direction : input ; capacitance : 1.0 ; } \
-      pin (Z) { direction : output ; function : \"A\" ; three_state : \"B\" ; \
+      pin (Z) { direction : output ; function : \"A\" ; three_state : \"!B\" ; \
         timing () { related_pin : \"A\" ; timing_sense : positive_unate ; \
           cell_rise (delay_t) { values (\"0.03, 0.30\", \"0.04, 0.31\") ; } } } } \
     cell (ICG) { area : 0.8 ; \
