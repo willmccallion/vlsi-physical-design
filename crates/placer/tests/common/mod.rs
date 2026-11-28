@@ -15,6 +15,21 @@ fn fixture(name: &str) -> PathBuf {
 /// gates, each NAND's second input fed by the gate halfway round, unplaced
 /// in a 60 by 60 um core of thirty rows of the fixture's cells.
 pub fn ring_text(gates: usize) -> String {
+    ring_def(gates, |_| None, &[])
+}
+
+/// [`ring_text`] with gate `g` placed with its lower-left corner at
+/// `starts[g]`, and a fixed RAM block at each corner of `blocks`.
+#[allow(dead_code)] // only the properties place the ring
+pub fn placed_ring_text(starts: &[(i64, i64)], blocks: &[(i64, i64)]) -> String {
+    ring_def(starts.len(), |g| Some(starts[g]), blocks)
+}
+
+fn ring_def(
+    gates: usize,
+    start: impl Fn(usize) -> Option<(i64, i64)>,
+    blocks: &[(i64, i64)],
+) -> String {
     let mut text = String::from(
         "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN ring ;\n\
          UNITS DISTANCE MICRONS 1000 ;\nDIEAREA ( 0 0 ) ( 60000 60000 ) ;\n",
@@ -28,10 +43,20 @@ pub fn ring_text(gates: usize) -> String {
         );
     }
     let is_inverter = |g: usize| g.is_multiple_of(3);
-    let _ = writeln!(text, "COMPONENTS {gates} ;");
+    let _ = writeln!(text, "COMPONENTS {} ;", gates + blocks.len());
     for g in 0..gates {
         let master = if is_inverter(g) { "INV" } else { "NAND2" };
-        let _ = writeln!(text, "- g{g} {master} ;");
+        match start(g) {
+            Some((x, y)) => {
+                let _ = writeln!(text, "- g{g} {master} + PLACED ( {x} {y} ) N ;");
+            }
+            None => {
+                let _ = writeln!(text, "- g{g} {master} ;");
+            }
+        }
+    }
+    for (b, &(x, y)) in blocks.iter().enumerate() {
+        let _ = writeln!(text, "- ram{b} RAM + FIXED ( {x} {y} ) N ;");
     }
     let _ = writeln!(text, "END COMPONENTS\nNETS {gates} ;");
     for g in 0..gates {
