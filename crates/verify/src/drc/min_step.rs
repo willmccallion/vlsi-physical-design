@@ -94,8 +94,8 @@ impl LayerCheck<'_> {
             return;
         }
         let mut run = Run::starting_at(edge(first));
-        for k in first + 1..=first + loop_edges.len() {
-            let e = edge(k);
+        for offset in 1..=loop_edges.len() {
+            let e = edge(first + offset);
             if is_long(e) {
                 run.routed |= !e.fixed;
                 self.check_run(&run, rule, found);
