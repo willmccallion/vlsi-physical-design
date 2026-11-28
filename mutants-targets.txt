@@ -1,0 +1,24 @@
+crates/resizer/src/dmp.rs:109:21: replace < with <= in fit_gate
+crates/resizer/src/dmp.rs:372:21: replace < with <= in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:762:14: replace + with * in lu_decompose
+crates/resizer/src/dmp.rs:808:34: replace > with >= in find_root
+crates/resizer/src/dmp.rs:814:37: replace * with / in find_root
+crates/resizer/src/dmp.rs:815:33: replace > with >= in find_root
+crates/resizer/src/dmp.rs:829:15: replace < with <= in find_root
+crates/resizer/src/moves.rs:1061:54: replace > with >= in side_loads_ok
+crates/resizer/src/moves.rs:1248:17: replace != with == in join_at_load
+crates/resizer/src/moves.rs:1253:17: replace != with == in join_at_load
+crates/resizer/src/moves.rs:333:46: replace || with && in Moves::swap_pins
+crates/resizer/src/moves.rs:524:24: replace > with >= in Moves::unbuffer
+crates/resizer/src/moves.rs:611:20: replace < with <= in upsize_cell
+crates/resizer/src/moves.rs:635:24: replace > with >= in intrinsic_delay
+crates/resizer/src/moves.rs:784:27: replace || with && in equivalent_pins
+crates/resizer/src/moves.rs:837:50: replace == with != in ports_equivalent
+crates/resizer/src/moves.rs:885:26: replace || with && in swap_candidate
+crates/resizer/src/moves.rs:885:47: replace || with && in swap_candidate
+crates/resizer/src/moves.rs:983:29: replace + with - in driver_change
+crates/resizer/src/setup.rs:542:30: replace += with *= in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:543:33: replace > with == in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:543:33: replace > with >= in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:621:27: replace + with * in Repair<'_, '_>::last_gasp
+crates/resizer/src/setup.rs:725:21: replace && with || in Repair<'_, '_>::load_delay
