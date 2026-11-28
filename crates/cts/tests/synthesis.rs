@@ -19,6 +19,8 @@ use pare_cts::{
 };
 use pare_resizer::WireRc;
 use pare_resizer::{ClockNetwork, Constants, Link, Namer, Netlist, repair_clock_inverters};
+use proptest::prelude::*;
+use proptest::test_runner::{Config as ProptestConfig, RngSeed};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -31,6 +33,20 @@ fn fixture(name: &str) -> PathBuf {
 /// A die with `columns` by `rows` flops on a grid, their clocks on one net
 /// from port `clk`, optionally through one inverter.
 fn design(columns: usize, rows: usize, inverter: bool) -> String {
+    let places: Vec<(usize, usize)> = (0..columns * rows)
+        .map(|i| {
+            let (c, r) = (i % columns, i / columns);
+            (
+                4000 + c * (380_000 / columns.max(1)) / 380 * 380,
+                2000 + r * (140 / rows.max(1)) * 2800,
+            )
+        })
+        .collect();
+    flops_at(&places, inverter)
+}
+
+/// [`design`]'s die with a flop at each of `places`.
+fn flops_at(places: &[(usize, usize)], inverter: bool) -> String {
     let mut text = String::from(
         "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN grid ;\n\
          UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 400000 400000 ) ;\n",
@@ -43,16 +59,10 @@ fn design(columns: usize, rows: usize, inverter: bool) -> String {
             2000 + r * 2800
         );
     }
-    let flops = columns * rows;
+    let flops = places.len();
     let _ = writeln!(text, "COMPONENTS {} ;", flops + usize::from(inverter));
-    for i in 0..flops {
-        let (c, r) = (i % columns, i / columns);
-        let _ = writeln!(
-            text,
-            "- ff{i} DFF_X1 + PLACED ( {} {} ) N ;",
-            4000 + c * (380_000 / columns.max(1)) / 380 * 380,
-            2000 + r * (140 / rows.max(1)) * 2800
-        );
+    for (i, &(x, y)) in places.iter().enumerate() {
+        let _ = writeln!(text, "- ff{i} DFF_X1 + PLACED ( {x} {y} ) N ;");
     }
     if inverter {
         text.push_str("- clkinv INV_X1 + PLACED ( 2000 2000 ) N ;\n");
@@ -217,8 +227,8 @@ fn stacked_on_ff0(text: &str) -> String {
 
 /// Synthesizes the trees of the generated design `text` with no wire
 /// length limit and checks that every flop is clocked from the root buffer
-/// through clock buffers alone.
-fn assert_every_flop_is_clocked_through_the_tree(text: &str) {
+/// through clock buffers alone; the sinks the trees reach.
+fn assert_every_flop_is_clocked_through_the_tree(text: &str) -> usize {
     let (db, lib, constraints) = load(1, 1, false);
     let mut db = def::parse_str(text, Path::new("grid.def"), db.library).unwrap();
     let link = Link::new(&db, &lib, &[]).unwrap();
@@ -233,7 +243,7 @@ fn assert_every_flop_is_clocked_through_the_tree(text: &str) {
         options: CtsOptions::default(),
     };
 
-    let _ = synthesize(&mut db, &input).unwrap();
+    let trees = synthesize(&mut db, &input).unwrap();
 
     for pin in flop_clock_pins(&db) {
         let path = path_to_port(&db, pin);
@@ -244,16 +254,54 @@ fn assert_every_flop_is_clocked_through_the_tree(text: &str) {
             db.pin_name(pin)
         );
     }
+    trees.summary.sinks
 }
 
 #[test]
 fn flops_on_one_spot_are_each_clocked_through_the_tree() {
-    assert_every_flop_is_clocked_through_the_tree(&stacked_on_ff0(&design(3, 3, false)));
+    let sinks =
+        assert_every_flop_is_clocked_through_the_tree(&stacked_on_ff0(&design(3, 3, false)));
+
+    assert_eq!(sinks, 9);
 }
 
 #[test]
 fn clustered_flops_on_one_spot_are_each_clocked_through_the_tree() {
-    assert_every_flop_is_clocked_through_the_tree(&stacked_on_ff0(&design(16, 16, false)));
+    let sinks =
+        assert_every_flop_is_clocked_through_the_tree(&stacked_on_ff0(&design(16, 16, false)));
+
+    assert_eq!(sinks, 256);
+}
+
+/// One to four hundred flops on the rows' sites anywhere on the die, some
+/// of them on the same spot.
+fn flop_places() -> impl Strategy<Value = Vec<(usize, usize)>> {
+    prop::collection::vec((0..1000_usize, 0..140_usize), 1..400).prop_map(|slots| {
+        slots
+            .into_iter()
+            .map(|(site, row)| (2000 + site * 380, 2000 + row * 2800))
+            .collect()
+    })
+}
+
+fn property_config() -> ProptestConfig {
+    ProptestConfig {
+        cases: 24,
+        rng_seed: RngSeed::Fixed(53),
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    }
+}
+
+proptest! {
+    #![proptest_config(property_config())]
+
+    #[test]
+    fn every_flop_anywhere_is_clocked_once_through_the_tree(places in flop_places()) {
+        let sinks = assert_every_flop_is_clocked_through_the_tree(&flops_at(&places, false));
+
+        prop_assert_eq!(sinks, places.len());
+    }
 }
 
 #[test]
