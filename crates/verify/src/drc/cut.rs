@@ -68,14 +68,10 @@ impl LayerCheck<'_> {
     /// Checks cut `i` against the cuts near it under rule `k`.
     fn check_rule(&self, i: usize, k: usize, rule: &CutSpacing, found: &mut Markers) {
         let cut = self.cut.rects[i];
-        let reach = match rule.condition {
-            CutSpacingCondition::AdjacentCuts { within, .. } => rule.spacing.max(within),
-            _ => rule.spacing,
-        };
         if !self.has_adjacent_cuts(&cut, rule) {
             return;
         }
-        for j in self.cut.near(&cut.rect.expand(reach)) {
+        for j in self.cut.near(&cut.rect.expand(rule.spacing)) {
             if j == i {
                 continue;
             }
