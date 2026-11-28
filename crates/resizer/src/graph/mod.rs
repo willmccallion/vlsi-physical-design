@@ -427,9 +427,7 @@ impl TimingGraph {
                 .unwrap_or(0);
             let _ = self.level.push(level);
         }
-        while self.parasitics.len() < db.nets.len() {
-            let _ = self.parasitics.push(None);
-        }
+        self.parasitics.grow_to(db.nets.len(), None);
     }
 
     /// The drivers of `load`'s cell with an arc from it, and whether that
