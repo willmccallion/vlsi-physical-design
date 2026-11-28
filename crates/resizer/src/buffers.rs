@@ -282,7 +282,7 @@ fn has_tristate_or_protected_driver(netlist: &Netlist<'_>, net: NetId) -> bool {
     netlist.drivers(net).any(|pin| {
         if netlist
             .lib_port(pin)
-            .is_some_and(|p| p.three_state.is_some())
+            .is_some_and(|p| p.tristate_enable.is_some())
         {
             return true;
         }

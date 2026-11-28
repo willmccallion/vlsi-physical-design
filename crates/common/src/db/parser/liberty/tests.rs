@@ -656,6 +656,21 @@ fn non_unate_arcs_come_falling_outputs_first_as_opensta_makes_them() {
 }
 
 #[test]
+fn a_three_state_condition_is_read_as_the_enable_it_negates() {
+    let z = |three_state: &str| {
+        let cell = sensed_cell(
+            &format!(r#"function : "A"; three_state : "{three_state}";"#),
+            r#"related_pin : "A";"#,
+        );
+        cell.ports[cell.port("Z").unwrap()].tristate_enable.clone()
+    };
+    let en = || FuncExpr::Port("EN".into());
+
+    assert_eq!(z("!EN"), Some(en()));
+    assert_eq!(z("EN"), Some(FuncExpr::Not(Box::new(en()))));
+}
+
+#[test]
 fn a_missing_tristate_enable_sense_is_the_opposite_of_the_three_state_condition() {
     let cell = sensed_cell(
         r#"function : "A"; three_state : "!EN";"#,

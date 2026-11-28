@@ -142,7 +142,7 @@ fn port(name: &str, direction: PortDirection, function: Option<&str>) -> LibPort
         max_fanout: None,
         fanout_load: None,
         function: function.map(|f| FuncExpr::parse(f).unwrap()),
-        three_state: None,
+        tristate_enable: None,
         is_clock: false,
         clock_gate: ClockGatePin::None,
         clock_tree_paths: Vec::new(),
@@ -454,7 +454,7 @@ fn cells_differing_in_storage_power_pins_or_a_pin_are_not_equivalent() {
     let mut fewer_power = buffer("BUF_1P");
     fewer_power.pg_pins.truncate(1);
     let mut tristate = buffer("TBUF");
-    tristate.ports[LibPortId::new(1)].three_state = Some(FuncExpr::parse("!EN").unwrap());
+    tristate.ports[LibPortId::new(1)].tristate_enable = Some(FuncExpr::parse("EN").unwrap());
     let mut flipped = buffer("BUF_IN");
     flipped.ports[LibPortId::new(0)].direction = PortDirection::Output;
 

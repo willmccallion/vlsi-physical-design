@@ -238,7 +238,7 @@ impl Constants {
                 let Some(port) = netlist.lib_port(pin) else {
                     continue;
                 };
-                if port.three_state.is_some() {
+                if port.tristate_enable.is_some() {
                     continue;
                 }
                 let value = match port.function {
@@ -304,7 +304,7 @@ impl Constants {
                 continue;
             };
             let value = if let Some(function) = &port.function {
-                match &port.three_state {
+                match &port.tristate_enable {
                     Some(enable) if enable.eval(&port_level) != Logic::One => Logic::Unknown,
                     _ => function.eval(&port_level),
                 }
@@ -369,7 +369,7 @@ impl Constants {
             return true;
         }
         let port_level = netlist.port_levels(instance, &self.level);
-        if let Some(enable) = &cell.ports[to_port].three_state
+        if let Some(enable) = &cell.ports[to_port].tristate_enable
             && enable.eval(&port_level) == Logic::Zero
         {
             return false;
