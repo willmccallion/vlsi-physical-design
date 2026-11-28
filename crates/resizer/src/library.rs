@@ -7,7 +7,7 @@ use pare_common::db::indices::{CellId, IdVec, MacroId, MacroPinId, PinId, SiteId
 use pare_common::db::liberty::{BufferCell, LibCell, LibCellId, LibPortId, Liberty};
 use pare_common::db::library::{CoreKind, MacroClass, PinDirection, SignalUse};
 use pare_common::geom::dbu::DbuArea;
-use pare_common::units::{Farads, Ohms, Watts};
+use pare_common::units::{Farads, Ohms, Seconds, Watts};
 use std::collections::HashMap;
 
 /// Bands of drive resistance `findBuffers` splits the buffers into.
@@ -472,6 +472,15 @@ impl Link<'_> {
 
 /// A cell's leakage, as `Resizer::cellLeakage`: its `cell_leakage_power`,
 /// else the mean of its per-state leakages.
+/// The largest intrinsic delay of the arcs into `port`, none below zero,
+/// as `LibertyPort::intrinsicDelay`.
+pub(crate) fn intrinsic_delay(cell: &LibCell, port: LibPortId) -> Seconds {
+    cell.delay_arc_sets_to(port)
+        .flat_map(|s| s.arcs.iter())
+        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
+        .fold(Seconds::ZERO, Seconds::max)
+}
+
 fn cell_leakage(cell: &LibCell) -> Option<Watts> {
     if cell.leakage.is_some() || cell.state_leakages.is_empty() {
         return cell.leakage;

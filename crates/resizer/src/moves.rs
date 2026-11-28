@@ -6,7 +6,7 @@
 
 use crate::bnet::{self, Bnet, BnetPtr, Kind};
 use crate::fuzzy;
-use crate::library::is_logic_std_cell;
+use crate::library::{intrinsic_delay, is_logic_std_cell};
 use crate::rebuffer::{Rebuffer, can_remove_buffer};
 use crate::resizer::{PortSlews, RepairError, Resizer, buffer_delays, gate_delays};
 use crate::sta::{Path, Sta};
@@ -624,16 +624,6 @@ const fn driven_delay(prev_drive: Ohms, cap: Farads, gate_delay: Seconds) -> Sec
             .get()
             .mul_add(cap.get(), gate_delay.max(Seconds::ZERO).get()),
     )
-}
-
-/// The largest intrinsic delay of the arcs into `port`, as
-/// `LibertyPort::intrinsicDelay`.
-fn intrinsic_delay(cell: &LibCell, port: LibPortId) -> Seconds {
-    cell.delay_arc_sets_to(port)
-        .flat_map(|s| s.arcs.iter())
-        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
-        .filter(|&d| d > Seconds::ZERO)
-        .fold(Seconds::ZERO, Seconds::max)
 }
 
 /// A load of a net and the slack it has beyond its driver's.
