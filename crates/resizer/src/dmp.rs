@@ -760,11 +760,9 @@ fn lu_decompose<const N: usize>(a: &mut [[f64; N]; N]) -> Result<[usize; N], Dmp
         if a[j][j] == 0.0 {
             a[j][j] = TINY;
         }
-        if j + 1 != N {
-            let pivot = 1.0 / a[j][j];
-            for row in a.iter_mut().skip(j + 1) {
-                row[j] *= pivot;
-            }
+        let pivot = 1.0 / a[j][j];
+        for row in a.iter_mut().skip(j + 1) {
+            row[j] *= pivot;
         }
     }
     Ok(index)
