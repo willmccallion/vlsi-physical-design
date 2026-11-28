@@ -1,0 +1,7 @@
+crates/resizer/src/rebuffer/timing.rs:410:46: replace < with <= in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:423:24: replace > with >= in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:438:52: replace + with - in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:440:36: replace - with + in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:440:59: replace < with <= in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:440:59: replace < with == in Rebuffer::rewrite_topology
+crates/resizer/src/rebuffer/timing.rs:448:31: replace + with - in Rebuffer::rewrite_topology
