@@ -481,3 +481,6 @@ fn push_route_elem(lib: &Library, elem: RouteElem, keyword: &str, line: &mut Str
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
