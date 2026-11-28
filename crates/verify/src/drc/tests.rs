@@ -1562,3 +1562,5 @@ fn a_two_widths_table_spaces_a_narrow_and_a_wide_shape_by_their_cell() {
         [Violation::SpacingTableTw]
     );
 }
+
+mod metal_checks;
