@@ -1,7 +1,8 @@
 //! What routing keeps on a roomy design, whatever its cells and nets: every
 //! net ends in one connected piece, the independent checker of the verify
 //! crate finds no violation, the routes do not depend on how many threads
-//! found them, and every net's global route reaches each of its pins.
+//! found them, every net's global route reaches each of its pins, and a
+//! routed design reads back from its DEF as it was written.
 
 #![allow(clippy::unwrap_used)]
 
@@ -121,5 +122,17 @@ proptest! {
                 prop_assert!(false, "net {}: {why}", db.nets[net].name);
             }
         }
+    }
+
+    #[test]
+    fn a_routed_design_reads_back_from_its_def_as_it_was_written(design in inverter_networks()) {
+        let mut db = designs::parse(&design.def_text());
+        let _ = route(&mut db, &RouteSetup::from(&RoutingConfig::default())).unwrap();
+
+        let mut text = Vec::new();
+        def::write(&db, &mut text).unwrap();
+        let read_back = designs::parse(&String::from_utf8(text).unwrap());
+
+        prop_assert_eq!(read_back, db);
     }
 }
