@@ -3,6 +3,7 @@
 
 use crate::db::design::NetlistDB;
 use crate::db::parser::{def, lef};
+use proptest::prelude::*;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -22,8 +23,8 @@ pub fn fixture(name: &str) -> PathBuf {
 #[must_use]
 pub fn parse(text: &str) -> NetlistDB {
     let units = def::read_units(&fixture("tiny.def")).unwrap_or_else(|e| panic!("tiny.def: {e}"));
-    let library = lef::parse_files(&[fixture("tiny.lef")], units)
-        .unwrap_or_else(|e| panic!("tiny.lef: {e}"));
+    let library =
+        lef::parse_files(&[fixture("tiny.lef")], units).unwrap_or_else(|e| panic!("tiny.lef: {e}"));
     def::parse_str(text, Path::new("generated.def"), library)
         .unwrap_or_else(|e| panic!("generated DEF: {e}\n{text}"))
 }
@@ -90,9 +91,9 @@ fn ring_def(
 
 /// Columns of cell slots a row of [`InverterNetwork`] holds, each slot six
 /// sites wide.
-pub const SLOT_COLUMNS: i64 = 16;
+const SLOT_COLUMNS: i64 = 16;
 /// Rows of [`InverterNetwork`]'s core; cells stand on every other one.
-pub const ROWS: i64 = 12;
+const ROWS: i64 = 12;
 /// The width of a slot, in database units: six sites of 0.2 um.
 const SLOT: i64 = 1200;
 /// The height of a row, in database units.
@@ -106,9 +107,9 @@ const ROW_HEIGHT: i64 = 2000;
 pub struct InverterNetwork {
     /// Each gate's slot, as a column below [`SLOT_COLUMNS`] and an even row
     /// below [`ROWS`].
-    pub gates: Vec<(i64, i64)>,
+    gates: Vec<(i64, i64)>,
     /// Each net's driving gate and the gates whose inputs it loads.
-    pub nets: Vec<(usize, Vec<usize>)>,
+    nets: Vec<(usize, Vec<usize>)>,
 }
 
 impl InverterNetwork {
@@ -166,6 +167,24 @@ impl InverterNetwork {
         }
         nets
     }
+}
+
+/// Roomy networks of 4 to 23 inverters, each driving up to three others.
+pub fn inverter_networks() -> impl Strategy<Value = InverterNetwork> {
+    let slots: Vec<(i64, i64)> = (0..ROWS)
+        .step_by(2)
+        .flat_map(|r| (0..SLOT_COLUMNS).map(move |c| (c, r)))
+        .collect();
+    prop::sample::subsequence(slots, 4..24)
+        .prop_flat_map(|slots| {
+            let n = slots.len();
+            let loads = prop::collection::vec(prop::collection::vec(0..n, 1..4), n);
+            (Just(slots), loads)
+        })
+        .prop_map(|(gates, loads)| InverterNetwork {
+            gates,
+            nets: loads.into_iter().enumerate().collect(),
+        })
 }
 
 /// The opening lines of a DEF of design `name` on a `w` by `h` die.

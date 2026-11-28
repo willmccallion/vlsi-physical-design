@@ -17,10 +17,12 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 log = "0.4"
 rayon = "1.10"
+proptest = { version = "=1.11.0", default-features = false, features = ["std"], optional = true }
 
 [features]
-# Helpers for the workspace's tests, such as golden files.
-testing = []
+# Helpers for the workspace's tests, such as golden files and generated designs.
+testing = ["dep:proptest"]
 
 [dev-dependencies]
+proptest = { version = "=1.11.0", default-features = false, features = ["std"] }
 toml = "0.8"

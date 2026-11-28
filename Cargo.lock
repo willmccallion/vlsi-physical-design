@@ -692,6 +692,7 @@ name = "pare-common"
 version = "0.1.0"
 dependencies = [
  "log",
+ "proptest",
  "rayon",
  "serde",
  "thiserror",
