@@ -189,36 +189,106 @@ fn fanout_work(places: &[(usize, usize)]) -> Work {
     Work { cells, nets }
 }
 
-/// What design repair reports of `work` under a fanout limit of three, and
-/// how many loads net `fo` has after it.
-fn repaired_under_fanout_limit(work: Work) -> (RepairSummary, usize) {
-    let constraints = "create_clock -name core -period 1.0 [get_ports clk]\n\
-                       set_input_delay 0.1 -clock core [get_ports in0]\n\
-                       set_max_fanout 3 [current_design]\n";
-    let (summary, db) = repaired_in_session(work, constraints, &cells_counting_fanout(), |r| {
-        Repairer::new(r).repair_design().unwrap()
-    });
-    let fo = db.net_id("fo").unwrap();
-    (summary, db.nets[fo].pins.len() - 1)
+/// The weakest buffer of the clock test cells, which fanout repeaters are
+/// put in as.
+const WEAKEST_BUFFER: &str = "BUF_X1";
+
+/// What design repair reports of `work` on a first and a second pass,
+/// under a fanout limit of `max_fanout` and the wire length limit
+/// `max_length`, and the design after both.
+fn repaired_twice(
+    work: Work,
+    max_fanout: usize,
+    max_length: Option<Dbu>,
+) -> ([RepairSummary; 2], NetlistDB) {
+    let constraints = format!(
+        "create_clock -name core -period 1.0 [get_ports clk]\n\
+         set_input_delay 0.1 -clock core [get_ports in0]\n\
+         set_max_fanout {max_fanout} [current_design]\n"
+    );
+    repaired_in_session(work, &constraints, &cells_counting_fanout(), |resizer| {
+        resizer.set_max_wire_length(max_length);
+        let first = Repairer::new(resizer).repair_design().unwrap();
+        let second = Repairer::new(resizer).repair_design().unwrap();
+        [first, second]
+    })
+}
+
+/// How many loads net `fo` has.
+fn fo_loads(db: &NetlistDB) -> usize {
+    db.nets[db.net_id("fo").unwrap()].pins.len() - 1
+}
+
+/// The cells repair put in: every one but the buffer `fan` and its flops.
+fn added_cells(db: &NetlistDB, flops: usize) -> usize {
+    db.cells.iter().filter(|c| !c.retired).count() - 1 - flops
+}
+
+/// Twenty-four flops spread over the die in a grid of six by four.
+fn spread_flops() -> Vec<(usize, usize)> {
+    (0..24).map(|i| ((i % 6) * 190, (i / 6) * 45)).collect()
 }
 
 #[test]
 fn design_repair_splits_a_net_over_its_fanout_limit_under_repeaters() {
     let places = [(0, 0), (300, 0), (600, 0), (0, 100), (300, 100), (600, 100)];
 
-    let (summary, fo_loads) = repaired_under_fanout_limit(fanout_work(&places));
+    let ([summary, _], db) = repaired_twice(fanout_work(&places), 3, None);
 
     assert_eq!(summary.fanout_violations, 1);
     assert!(summary.inserted >= 2, "{summary:#?}");
-    assert!(fo_loads <= 3, "fo loads {fo_loads}");
+    assert!(fo_loads(&db) <= 3, "fo loads {}", fo_loads(&db));
 }
 
 #[test]
 fn loads_stacked_within_a_micron_keep_their_fanout_violation() {
     let places = [(10, 10); 6];
 
-    let (summary, fo_loads) = repaired_under_fanout_limit(fanout_work(&places));
+    let ([summary, _], db) = repaired_twice(fanout_work(&places), 3, None);
 
     assert_eq!(summary.fanout_violations, 1);
-    assert_eq!(fo_loads, 6);
+    assert_eq!(fo_loads(&db), 6);
+}
+
+#[test]
+fn a_remainder_short_of_half_a_group_stays_on_the_net_it_was_on() {
+    let places = [(0, 0), (300, 0), (0, 100), (300, 100), (600, 50)];
+
+    let ([summary, _], db) = repaired_twice(fanout_work(&places), 4, None);
+
+    assert_eq!(summary.inserted, 1);
+    assert_eq!(fo_loads(&db), 2, "one flop left over and the repeater");
+}
+
+#[test]
+fn a_fanout_repeaters_own_net_is_repaired_and_what_that_inserts_is_counted() {
+    let flops = spread_flops();
+
+    let ([first, second], db) = repaired_twice(fanout_work(&flops), 3, Some(Dbu::new(60_000)));
+
+    assert_eq!(first.inserted, added_cells(&db, flops.len()));
+    assert_eq!(
+        second,
+        RepairSummary::default(),
+        "the first pass left nothing"
+    );
+}
+
+#[test]
+fn a_fanout_repeater_its_own_repair_resizes_counts_as_resized() {
+    let ([summary, _], db) = repaired_twice(fanout_work(&spread_flops()), 12, None);
+
+    let grown = db
+        .cells
+        .iter()
+        .filter(|c| c.name.starts_with("fanout"))
+        .filter(|c| db.library.macros[c.macro_id].name != WEAKEST_BUFFER)
+        .count();
+    let fan = db.cell_id("fan").unwrap();
+    assert_eq!(
+        db.library.macros[db.cells[fan].macro_id].name,
+        WEAKEST_BUFFER
+    );
+    assert!(grown > 0);
+    assert_eq!(summary.resized, grown);
 }
