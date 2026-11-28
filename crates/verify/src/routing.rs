@@ -125,9 +125,11 @@ pub fn net_components(db: &NetlistDB, net: NetId) -> usize {
 
     let mut order: Vec<usize> = (0..shapes.len()).collect();
     order.sort_by_key(|&i| shapes[i].0.rect.min.x);
-    for (pos, &a) in order.iter().enumerate() {
+    let mut rest = order.as_slice();
+    while let Some((&a, later)) = rest.split_first() {
+        rest = later;
         let ra = shapes[a].0;
-        for &b in &order[pos + 1..] {
+        for &b in later {
             let rb = shapes[b].0;
             if rb.rect.min.x > ra.rect.max.x {
                 break;
