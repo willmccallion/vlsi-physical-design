@@ -1002,43 +1002,33 @@ fn point(x: i64, y: i64) -> Point<Dbu> {
 }
 
 #[test]
-fn a_rectangle_without_width_is_kept_and_one_turned_inside_out_is_ignored() {
+fn a_rectangle_without_area_or_turned_inside_out_adds_no_shape() {
     let mut layout = Layout::new(1, 1);
     let owner = layout.owner(Owner::Net(NetId(0)), false);
 
-    layout.add(
-        M1,
-        owner,
+    for r in [
         Rect::new(point(10, 0), point(10, 100)),
-        Origin::Routing,
-    );
-    layout.add(
-        M1,
-        owner,
         Rect::new(point(0, 0), point(100, 0)),
-        Origin::Routing,
-    );
-    layout.add(
-        M1,
-        owner,
         Rect::new(point(10, 0), point(0, 100)),
-        Origin::Routing,
-    );
-    layout.add(
-        M1,
-        owner,
         Rect::new(point(0, 10), point(100, 0)),
-        Origin::Routing,
-    );
+    ] {
+        layout.add(M1, owner, r, Origin::Routing);
+    }
 
-    assert_eq!(
-        layout
-            .metal(LayerId(0))
-            .iter()
-            .map(|s| s.rect)
-            .collect::<Vec<_>>(),
-        [rect(10, 0, 10, 100), rect(0, 0, 100, 0)]
-    );
+    assert_eq!(layout.metal(LayerId(0)), []);
+}
+
+#[test]
+fn cuts_without_area_are_no_cuts_to_space() {
+    let mut f = Fixture::new();
+    let (a, b) = (f.a, f.b);
+    f.fix(V1, a, rect(0, 0, 100, 100));
+    f.route(V1, b, rect(150, 0, 150, 100));
+    f.route(V1, b, rect(0, 150, 100, 150));
+
+    let report = f.check(&rules(vec![cut_rule(100)]));
+
+    assert_eq!(report.violations, []);
 }
 
 #[test]
