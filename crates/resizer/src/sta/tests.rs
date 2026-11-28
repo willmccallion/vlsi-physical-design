@@ -1596,3 +1596,51 @@ fn a_latch_whose_clock_opens_and_closes_together_has_no_window_to_borrow_in() {
     assert!(rise.is_some_and(|t| is_ns(t, 0.65)), "{rise:?}");
     assert!(fall.is_some_and(|t| is_ns(t, 0.6)), "{fall:?}");
 }
+
+#[test]
+fn a_setup_multicycle_moves_the_latch_opening_that_data_before_it_is_required_at() {
+    let db = enabled_latch_design("LAT", None);
+    let d = cell_pin(&db, "l/D");
+    let constraints = format!(
+        "{LATCH_CLOCK}set_input_delay 0.98 -clock clk [get_ports in]\n\
+         set_multicycle_path 2 -setup -from [get_clocks clk] -to [get_clocks clk]\n"
+    );
+
+    let slack = timed_with(&db, &latch_cells(), &constraints, |_, sta| {
+        sta.slack_edge(d, Edge::Rise, MinMax::Max).time().unwrap()
+    });
+
+    assert!(is_ns(slack, 2.0 - 0.98), "{slack:?}");
+}
+
+#[test]
+fn a_latch_behind_a_propagated_clock_opens_when_the_clock_reaches_it() {
+    let db = design_with_copies(
+        &def_text(
+            "late_latch",
+            &DefSections {
+                components: "- cb BUF_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - l LAT + PLACED ( 6000 2800 ) N ;\n",
+                nets: "- clk ( PIN clk ) ( cb A ) ;\n- ck ( cb Z ) ( l CK ) ;\n\
+                       - in ( PIN in ) ( l D ) ;\n- out ( l Q ) ( PIN out ) ;\n",
+                inputs: &["clk", "in"],
+                outputs: &["out"],
+            },
+        ),
+        &[("DFF_X1", "LAT")],
+    );
+    let (d, ck) = (cell_pin(&db, "l/D"), cell_pin(&db, "l/CK"));
+    let constraints = "create_clock -name clk -period 2.0 [get_ports clk]\n\
+                       set_propagated_clock [get_clocks clk]\n\
+                       set_input_delay 0 -clock clk [get_ports in]\n";
+
+    let (slack, latency) = timed_with(&db, &latch_cells(), constraints, |_, sta| {
+        (
+            sta.slack_edge(d, Edge::Rise, MinMax::Max).time().unwrap(),
+            sta.arrival(ck, Edge::Rise, MinMax::Min).unwrap(),
+        )
+    });
+
+    assert!(latency > Seconds::new(1e-12));
+    assert!(is_ns(slack - latency, 0.0), "{slack:?} vs {latency:?}");
+}
