@@ -897,6 +897,10 @@ fn placing_a_timed_design_shows_what_each_repair_did() {
         report["netlist"]["slew_violations"].to_string()
     );
     assert_eq!(
+        printed_stat(&printed, "Fanout violations:"),
+        report["netlist"]["fanout_violations"].to_string()
+    );
+    assert_eq!(
         printed_stat(&printed, "Sinks:"),
         report["clock_tree"]["sinks"].to_string()
     );

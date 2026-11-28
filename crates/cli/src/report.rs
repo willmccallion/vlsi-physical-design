@@ -84,6 +84,8 @@ pub(crate) struct DesignRepairSummary {
     pub(crate) slew_violations: usize,
     /// Drivers whose load broke their capacitance limit.
     pub(crate) cap_violations: usize,
+    /// Drivers whose loads broke their fanout limit.
+    pub(crate) fanout_violations: usize,
     /// Nets repair changed.
     pub(crate) repaired_nets: usize,
     /// Instances repair resized.
@@ -98,6 +100,7 @@ impl DesignRepairSummary {
         Self {
             slew_violations: done.slew_violations,
             cap_violations: done.cap_violations,
+            fanout_violations: done.fanout_violations,
             repaired_nets: done.repaired_nets,
             resized: done.resized,
             repeaters: done.inserted,

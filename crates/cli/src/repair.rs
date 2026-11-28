@@ -348,13 +348,14 @@ fn show_design_repair(done: &pare_resizer::RepairSummary, cells: usize) {
         ("Cap violations:", &done.cap_violations.to_string()),
     );
     ui::stat_pair(
+        ("Fanout violations:", &done.fanout_violations.to_string()),
+        ("Nets repaired:", &done.repaired_nets.to_string()),
+    );
+    ui::stat_pair(
         ("Resized:", &done.resized.to_string()),
         ("Repeaters:", &done.inserted.to_string()),
     );
-    ui::stat_pair(
-        ("Nets repaired:", &done.repaired_nets.to_string()),
-        ("Cells:", &cells.to_string()),
-    );
+    ui::stat("Cells:", &cells.to_string());
 }
 
 /// Repairs the paths failing setup and then hold on the legalized placement, as
