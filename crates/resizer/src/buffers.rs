@@ -220,8 +220,9 @@ pub fn buffer_ports(
         let netlist = Netlist::new(db, link);
         match direction {
             PinDirection::Input => {
+                // NOTE: bufferInputs also skips an input held constant, which
+                // only case analysis can do; PARE's SDC reader refuses it.
                 if clocks.is_clock(pin)
-                    || constants.is_constant(pin)
                     || netlist.is_special(net)
                     || !netlist.has_instance_pins(net)
                     || !input_wants_buffer(&netlist, pin, net)
