@@ -5,11 +5,11 @@
 
 use pare_common::db::design::{NetlistDB, NonDefaultLayer, NonDefaultRule, PinOwner};
 use pare_common::db::global_route::{NetRoute, PinGridLocation, RoutePoint, RouteSegment};
-use pare_common::db::indices::{LayerId, NetId, PinId};
+use pare_common::db::indices::{CutLayerId, LayerId, NetId, PinId};
 use pare_common::db::parser::{def, lef, liberty};
 use pare_common::geom::dbu::{Dbu, DbuPerMicron};
 use pare_common::geom::point::Point;
-use pare_common::units::{Farads, FaradsPerMeter, OhmsPerMeter, Seconds};
+use pare_common::units::{Farads, FaradsPerMeter, Ohms, OhmsPerMeter, Seconds};
 use pare_resizer::RouteRc;
 use pare_resizer::bnet::{self, Kind, LoadModel, PinLoad, TreeRc};
 use pare_resizer::{Link, Netlist, RepairError};
@@ -353,5 +353,55 @@ fn a_route_that_misses_a_load_fails_to_build_a_tree() {
             found: 1,
             expected: 2,
         })
+    );
+}
+
+fn tree_rc(layers: &RouteRc) -> TreeRc<'_> {
+    TreeRc {
+        signal: WireRc {
+            resistance: OhmsPerMeter::from_ohms_per_micron(3.0),
+            capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.1),
+            layer: LayerId(0),
+        },
+        layers: Some(layers),
+        dbu: DbuPerMicron::new(1000).unwrap(),
+    }
+}
+
+#[test]
+fn a_cut_takes_the_set_via_resistance_over_the_lef_one() {
+    let db = tiny_design();
+    let from_lef = RouteRc::new(&db.library, &[], &[], LayerId(0));
+    let set = RouteRc::new(
+        &db.library,
+        &[],
+        &[(CutLayerId(0), Ohms::new(8.0))],
+        LayerId(0),
+    );
+
+    let lef_ohms = tree_rc(&from_lef).via(LayerId(0), LayerId(1));
+    let set_ohms = tree_rc(&set).via(LayerId(0), LayerId(1));
+
+    assert_eq!(lef_ohms, Ohms::new(5.0));
+    assert_eq!(set_ohms, Ohms::new(8.0));
+}
+
+#[test]
+fn a_layer_reports_the_rc_set_for_it_to_the_wires_of_a_tree() {
+    let db = tiny_design();
+    let rc = RouteRc::new(
+        &db.library,
+        &[(LayerId(1), per_meter_ohms(2.0e6), per_meter_farads(1.0e-10))],
+        &[],
+        LayerId(0),
+    );
+
+    assert_eq!(
+        rc.layer_rc(LayerId(1)),
+        (per_meter_ohms(2.0e6), per_meter_farads(1.0e-10))
+    );
+    assert_eq!(
+        tree_rc(&rc).wire(Some(LayerId(1))),
+        (per_meter_ohms(2.0e6), per_meter_farads(1.0e-10))
     );
 }
