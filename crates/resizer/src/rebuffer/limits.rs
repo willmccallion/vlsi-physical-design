@@ -3,7 +3,7 @@
 use super::{CAP_MARGIN, ELMORE_SKEW_FACTOR, SLEW_MARGIN};
 use crate::bnet::{BufferSize, Fixed};
 use crate::dmp::{self, PiModel};
-use crate::library::{BufferSet, Link};
+use crate::library::{BufferSet, Link, intrinsic_delay};
 use crate::parasitics::WireRc;
 use crate::resizer::{RepairError, Resizer, find_targets, meters_to_dbu};
 use crate::sta::Sta;
@@ -21,12 +21,7 @@ pub(super) fn margined<Q: Mul<f64, Output = Q>>(limit: Q, percent: f64) -> Q {
 pub(super) fn buffer_size(resizer: &Resizer<'_, Sta>, buffer: BufferCell) -> BufferSize {
     let lib = resizer.link.liberty.cell(buffer.id);
     let (input, output) = (buffer.input, buffer.output);
-    let intrinsic = lib
-        .delay_arc_sets_to(output)
-        .flat_map(|s| s.arcs.iter())
-        .map(|a| a.gate_delay(Seconds::ZERO, Farads::ZERO).0)
-        .filter(|&d| d > Seconds::ZERO)
-        .fold(Seconds::ZERO, Seconds::max);
+    let intrinsic = intrinsic_delay(lib, output);
     let cap_limit = resizer
         .link
         .liberty
