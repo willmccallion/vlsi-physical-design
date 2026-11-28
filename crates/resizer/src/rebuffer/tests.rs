@@ -8,6 +8,7 @@ use crate::testing::{
     cells, cells_with, clock_cells_source, design, design_with_copies, metal2_wires, pin,
     with_session_inputs, with_timed_session, with_wired_session,
 };
+use pare_common::convert::SaturatingFrom;
 use pare_common::db::design::NetlistDB;
 use pare_common::db::global_route::{NetRoute, RouteSource};
 use pare_common::db::indices::NetId;
@@ -651,8 +652,32 @@ impl Lcg {
     }
 }
 
-/// A buffer cell `name` whose tables rise with slew and load, from `rng`.
-fn random_buffer(name: &str, rng: &mut Lcg) -> String {
+/// How a buffer's output slew follows its load.
+#[derive(Clone, Copy)]
+enum SlewShape {
+    /// Rising steeply with load.
+    Rising,
+    /// Starting high and rising slowly, so that the slew limit is only
+    /// reached at many times the first guess of the load.
+    Gentle,
+    /// Staying under any slew limit.
+    Never,
+    /// Not tabulated: the buffer has no drive resistance.
+    Missing,
+}
+
+impl SlewShape {
+    const ALL: [Self; 4] = [Self::Rising, Self::Gentle, Self::Never, Self::Missing];
+
+    /// The `index`th shape in turn.
+    fn nth(index: usize) -> Self {
+        Self::ALL[index % Self::ALL.len()]
+    }
+}
+
+/// A buffer cell `name` whose delay rises with slew and load, and whose
+/// output slew follows `shape`, from `rng`.
+fn random_buffer(name: &str, rng: &mut Lcg, shape: SlewShape) -> String {
     let table = |rng: &mut Lcg, base: (f64, f64), step: (f64, f64)| {
         let first = rng.between(base.0, base.1);
         let load = first + rng.between(step.0, step.1);
@@ -661,7 +686,20 @@ fn random_buffer(name: &str, rng: &mut Lcg) -> String {
         format!("\"{first:.4}, {load:.4}\", \"{slew:.4}, {both:.4}\"")
     };
     let delay = table(rng, (0.01, 0.05), (0.05, 0.4));
-    let transition = table(rng, (0.005, 0.02), (0.05, 0.5));
+    let transition = match shape {
+        SlewShape::Rising => table(rng, (0.005, 0.02), (0.05, 0.5)),
+        SlewShape::Gentle => table(rng, (0.12, 0.2), (0.01, 0.03)),
+        SlewShape::Never => table(rng, (0.02, 0.03), (0.0, 0.002)),
+        SlewShape::Missing => String::new(),
+    };
+    let transitions = if transition.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "rise_transition (delay_t) {{ values ({transition}) ; }} \
+             fall_transition (delay_t) {{ values ({transition}) ; }}"
+        )
+    };
     let area = rng.between(0.5, 3.0);
     let input_cap = rng.between(0.5, 5.0);
     let max_cap = rng.between(20.0, 200.0);
@@ -673,8 +711,7 @@ fn random_buffer(name: &str, rng: &mut Lcg) -> String {
          max_transition : {max_transition:.3} ; \
          timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ; \
          cell_rise (delay_t) {{ values ({delay}) ; }} cell_fall (delay_t) {{ values ({delay}) ; }} \
-         rise_transition (delay_t) {{ values ({transition}) ; }} \
-         fall_transition (delay_t) {{ values ({transition}) ; }} }} }} }}\n"
+         {transitions} }} }} }}\n"
     )
 }
 
@@ -683,7 +720,11 @@ fn the_limits_of_seeded_buffers_are_as_they_were() {
     const COUNT: usize = 60;
     let mut rng = Lcg(11);
     let names: Vec<String> = (0..COUNT).map(|i| format!("RB{i}")).collect();
-    let extra: String = names.iter().map(|n| random_buffer(n, &mut rng)).collect();
+    let extra: String = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| random_buffer(n, &mut rng, SlewShape::nth(i)))
+        .collect();
     let mut db = buffer_between_flops("PLACED");
     let lib = cells_with(&extra);
     let wires = |resistance: f64, capacitance: f64| WireRc {
@@ -735,7 +776,11 @@ fn the_longest_wire_worth_no_buffer_for_seeded_buffer_sets_is_as_it_was() {
     const COUNT: usize = 24;
     let mut rng = Lcg(23);
     let names: Vec<String> = (0..COUNT).map(|i| format!("RB{i}")).collect();
-    let extra: String = names.iter().map(|n| random_buffer(n, &mut rng)).collect();
+    let extra: String = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| random_buffer(n, &mut rng, SlewShape::nth(i)))
+        .collect();
     let db = buffer_between_flops("PLACED");
     let lib = cells_with(&extra);
     let link = Link::new(&db, &lib, &[]).unwrap();
@@ -1181,4 +1226,107 @@ fn the_session_wire_length_limit_is_the_one_its_buffers_and_wire_give() {
         assert_eq!(max_wire_length(resizer), expected);
         assert_eq!(rebuffer.max_wire_length, expected);
     });
+}
+
+/// The DEF of a driver flop `f1` whose net `q` reaches `loads` flops
+/// placed by `rng` over up to 1.6 million units (800 um) of die, some
+/// through a buffer `b1`.
+fn seeded_fanout(rng: &mut Lcg, loads: usize, buffered: bool) -> String {
+    let mut components = String::from("- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n");
+    let mut q = String::from("- q ( f1 Q )");
+    let mut clock = String::from("- clk ( PIN clk ) ( f1 CK )");
+    for i in 0..loads {
+        let x = i64::saturating_from(rng.between(20_000.0, 1_600_000.0)) / 2 * 2;
+        let y = i64::saturating_from(rng.between(2_800.0, 300_000.0)) / 2800 * 2800;
+        let _ = writeln!(components, "- l{i} DFF_X1 + PLACED ( {x} {y} ) N ;");
+        let _ = write!(clock, " ( l{i} CK )");
+        if buffered && i == 0 {
+            let _ = writeln!(components, "- b1 BUF_X1 + PLACED ( {} {y} ) N ;", x / 2);
+            q += " ( b1 A )";
+        } else {
+            let _ = write!(q, " ( l{i} D )");
+        }
+    }
+    let buffer_net = if buffered {
+        "- bz ( b1 Z ) ( l0 D ) ;\n"
+    } else {
+        ""
+    };
+    format!(
+        "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN seeded ;\n\
+         UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 1700000 400000 ) ;\n\
+         COMPONENTS {} ;\n{components}END COMPONENTS\n\
+         PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+         NETS {} ;\n{clock} ;\n{q} ;\n{buffer_net}END NETS\nEND DESIGN\n",
+        loads + 1 + usize::from(buffered),
+        2 + usize::from(buffered),
+    )
+}
+
+/// The buffers added to `resizer`'s design since it was made, as
+/// `name master x y`.
+fn added_buffers(resizer: &Resizer<'_, Sta>, before: usize) -> String {
+    resizer
+        .db
+        .cells
+        .iter()
+        .skip(before)
+        .fold(String::new(), |mut text, cell| {
+            let master = &resizer.db.library.macros[cell.macro_id].name;
+            let _ = write!(
+                text,
+                " [{} {master} {} {}{}]",
+                cell.name,
+                cell.location.x.get(),
+                cell.location.y.get(),
+                if cell.retired { " retired" } else { "" }
+            );
+            text
+        })
+}
+
+#[test]
+fn rebuffering_seeded_nets_gives_the_buffers_it_did() {
+    const CASES: usize = 36;
+    let mut rng = Lcg(5);
+    let extra: String = (0..3)
+        .map(|i| random_buffer(&format!("RB{i}"), &mut rng, SlewShape::Rising))
+        .collect();
+    let lib = cells_with(&extra);
+    let mut text = String::new();
+    for case in 0..CASES {
+        let loads = 2 + case % 5;
+        let period = rng.between(0.25, 0.8);
+        let constraints = format!("create_clock -name clk -period {period:.3} [get_ports clk]\n");
+        for whole_design in [false, true] {
+            let def = seeded_fanout(&mut Lcg(100 + case as u64), loads, case % 3 == 0);
+            let mut db = design_with_copies(
+                &def,
+                &[("BUF_X1", "RB0"), ("BUF_X1", "RB1"), ("BUF_X1", "RB2")],
+            );
+            let q = pin(&db, "f1/Q");
+            let before = db.cells.len();
+            with_wired_session(&mut db, &lib, &constraints, |resizer| {
+                let mut rebuffer = Rebuffer::new(resizer).unwrap();
+                let outcome = if whole_design {
+                    rebuffer
+                        .fully_rebuffer(resizer)
+                        .map(|()| (rebuffer.removed, rebuffer.inserted))
+                } else {
+                    rebuffer.rebuffer_pin(resizer, q).map(|count| (0, count))
+                };
+                let _ = writeln!(
+                    text,
+                    "case {case} loads {loads} period {period:.3} whole {whole_design}: {outcome:?}{}",
+                    added_buffers(resizer, before)
+                );
+            });
+        }
+    }
+
+    pare_common::testing::assert_golden(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
+        "c_rebuffered_nets.txt",
+        &text,
+    );
 }
