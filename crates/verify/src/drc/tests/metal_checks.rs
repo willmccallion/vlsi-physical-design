@@ -2,6 +2,11 @@
 //! shapes, minimum steps and minimum cuts.
 
 use super::*;
+use pare_common::testing::assert_golden;
+use proptest::prelude::*;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
+use std::fmt::Write;
 
 const MIN_AREA: i64 = 20_000;
 
@@ -416,4 +421,69 @@ fn a_width_range_asking_no_more_than_the_table_leaves_the_violation_a_table_one(
         pair_kinds(M1, rect(0, 0, 1000, 500), rect(0, 550, 1000, 1050), &rules),
         [Violation::MetalSpacing]
     );
+}
+
+/// Rules spacing metal by 100, or 150 beside a long run of wide metal.
+fn rules_of_random_layouts() -> Rules {
+    let mut rules = rules(Vec::new());
+    rules.metal[LayerId(0)].spacing = table(&[0, 150], &[(0, &[100, 100]), (150, &[100, 150])]);
+    rules
+}
+
+/// A layout of up to a dozen routed or fixed rectangles of two nets and
+/// an obstruction on a 50-unit grid, so that their sides often meet.
+fn random_layout_strategy() -> impl Strategy<Value = Vec<(u32, bool, [i64; 4])>> {
+    let side = prop::sample::select(vec![50, 100, 150, 200]);
+    let piece = (
+        0..3_u32,
+        any::<bool>(),
+        (0..8_i64, 0..8_i64, side.clone(), side),
+    )
+        .prop_map(|(owner, is_fixed, (x, y, w, h))| (owner, is_fixed, [x * 50, y * 50, w, h]));
+    prop::collection::vec(piece, 2..13)
+}
+
+/// The layout's markers, one line each: where they are as `x0 y0 x1 y1`.
+fn random_layout_report(pieces: &[(u32, bool, [i64; 4])]) -> String {
+    let mut f = Fixture::new();
+    let owners = [f.a, f.b, f.obstruction];
+    for &(owner, is_fixed, [x, y, w, h]) in pieces {
+        let shape = rect(x, y, x + w, y + h);
+        if is_fixed || owner == 2 {
+            f.fix(M1, owners[owner as usize], shape);
+        } else {
+            f.route(M1, owners[owner as usize], shape);
+        }
+    }
+    let report = f.check(&rules_of_random_layouts());
+    let mut text = String::new();
+    for (class, found) in [("routing", &report.violations), ("input", &report.input)] {
+        for m in found {
+            let b = m.bbox;
+            let (min, max) = (b.min, b.max);
+            let line = (min.x.get(), min.y.get(), max.x.get(), max.y.get());
+            writeln!(text, "  {class} {:?} {line:?} {:?}", m.violation, m.owners).unwrap();
+        }
+    }
+    text
+}
+
+#[test]
+fn random_layouts_keep_the_markers_recorded_for_them() {
+    let strategy = random_layout_strategy();
+    let mut runner = TestRunner::deterministic();
+    let mut text = String::new();
+    for n in 0..RANDOM_LAYOUTS {
+        let pieces = strategy.new_tree(&mut runner).unwrap().current();
+        writeln!(text, "layout {n}: {pieces:?}").unwrap();
+        text += &random_layout_report(&pieces);
+    }
+
+    assert_golden(&golden_dir(), "random_layout_markers.txt", &text);
+}
+
+const RANDOM_LAYOUTS: usize = 300;
+
+fn golden_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
 }
