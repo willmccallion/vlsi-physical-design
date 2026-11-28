@@ -420,7 +420,9 @@ fn dy(t: f64, t0: f64, dt: f64, rd: f64, cl: f64) -> [f64; 3] {
     } else {
         [
             -(y0dt(t1, rd, cl) - y0dt(t1 - dt, rd, cl)) / dt,
-            -(y0(t1, rd, cl) + y0(t1 - dt, rd, cl)) / (dt * dt) + y0dt(t1 - dt, rd, cl) / dt,
+            // NOTE: DmpAlg::dy adds y0(t1 - dt) here; the derivative of
+            // (y0(t1) - y0(t1 - dt)) / dt by dt subtracts it, so PARE does.
+            -(y0(t1, rd, cl) - y0(t1 - dt, rd, cl)) / (dt * dt) + y0dt(t1 - dt, rd, cl) / dt,
             (y0dcl(t1, rd, cl) - y0dcl(t1 - dt, rd, cl)) / dt,
         ]
     }
