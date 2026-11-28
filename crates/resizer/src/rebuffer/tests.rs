@@ -1166,3 +1166,19 @@ fn full_rebuffering_counts_the_buffers_it_puts_in_and_takes_out() {
         assert_eq!(rebuffer.inserted, placed);
     });
 }
+
+#[test]
+fn the_session_wire_length_limit_is_the_one_its_buffers_and_wire_give() {
+    with_search(|resizer, rebuffer| {
+        let expected = max_wire_length_of(
+            resizer.link,
+            &resizer.buffers,
+            resizer.graph.wire_rc(),
+            resizer.db.dbu(),
+        );
+
+        assert!(expected.is_some());
+        assert_eq!(max_wire_length(resizer), expected);
+        assert_eq!(rebuffer.max_wire_length, expected);
+    });
+}
