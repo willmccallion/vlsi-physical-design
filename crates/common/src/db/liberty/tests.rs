@@ -1,4 +1,6 @@
 use super::*;
+use proptest::prelude::*;
+use proptest::test_runner::{Config, RngSeed};
 
 #[test]
 fn logic_delays_are_the_delays_besides_tristate_enables() {
@@ -836,4 +838,85 @@ fn a_fanout_load_is_the_pin_s_else_the_library_s_else_zero() {
             .abs()
             < 1e-12
     );
+}
+
+/// Expressions over a few ports, up to six levels deep.
+fn func_exprs() -> impl Strategy<Value = FuncExpr> {
+    let leaf = prop_oneof![
+        Just(FuncExpr::Zero),
+        Just(FuncExpr::One),
+        "[A-Z][A-Z0-9_]{0,2}(\\[[0-9]\\])?".prop_map(FuncExpr::Port),
+    ];
+    leaf.prop_recursive(6, 48, 2, |inner| {
+        prop_oneof![
+            inner.clone().prop_map(|e| FuncExpr::Not(Box::new(e))),
+            (inner.clone(), inner.clone())
+                .prop_map(|(a, b)| FuncExpr::And(Box::new(a), Box::new(b))),
+            (inner.clone(), inner.clone())
+                .prop_map(|(a, b)| FuncExpr::Or(Box::new(a), Box::new(b))),
+            (inner.clone(), inner).prop_map(|(a, b)| FuncExpr::Xor(Box::new(a), Box::new(b))),
+        ]
+    })
+}
+
+/// How tightly an expression's outermost operator binds, as Liberty ranks
+/// them: a negation or an operand tightest, then `^`, `*`, `+`.
+const fn binding(e: &FuncExpr) -> u8 {
+    match e {
+        FuncExpr::Zero | FuncExpr::One | FuncExpr::Port(_) | FuncExpr::Not(_) => 3,
+        FuncExpr::Xor(..) => 2,
+        FuncExpr::And(..) => 1,
+        FuncExpr::Or(..) => 0,
+    }
+}
+
+/// `e` in Liberty's other spellings, with only the parentheses its
+/// operators' binding needs: a trailing `'` negates, juxtaposition conjoins
+/// and `+` disjoins.
+fn liberty_spelling(e: &FuncExpr) -> String {
+    let operand = |child: &FuncExpr, needs_parens: bool| {
+        let text = liberty_spelling(child);
+        if needs_parens {
+            format!("({text})")
+        } else {
+            text
+        }
+    };
+    let binary = |a: &FuncExpr, b: &FuncExpr, op: &str| {
+        let left = operand(a, binding(a) < binding(e));
+        let right = operand(b, binding(b) <= binding(e));
+        format!("{left}{op}{right}")
+    };
+    match e {
+        FuncExpr::Zero | FuncExpr::One | FuncExpr::Port(_) => e.to_string(),
+        FuncExpr::Not(inner) => format!("{}'", operand(inner, binding(inner) < 3)),
+        FuncExpr::Xor(a, b) => binary(a, b, " ^ "),
+        FuncExpr::And(a, b) => binary(a, b, " "),
+        FuncExpr::Or(a, b) => binary(a, b, " + "),
+    }
+}
+
+fn func_config() -> Config {
+    Config {
+        cases: 256,
+        rng_seed: RngSeed::Fixed(71),
+        failure_persistence: None,
+        ..Config::default()
+    }
+}
+
+proptest! {
+    #![proptest_config(func_config())]
+
+    #[test]
+    fn a_printed_function_reads_back_as_it_was(e in func_exprs()) {
+        prop_assert_eq!(FuncExpr::parse(&e.to_string()), Ok(e));
+    }
+
+    #[test]
+    fn a_function_in_libertys_other_spellings_reads_back_as_it_was(e in func_exprs()) {
+        let text = liberty_spelling(&e);
+
+        prop_assert_eq!(FuncExpr::parse(&text), Ok(e), "{}", text);
+    }
 }
