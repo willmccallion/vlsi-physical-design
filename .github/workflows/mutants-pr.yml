@@ -1,0 +1,81 @@
+name: Mutants on changes
+
+# Mutation testing of what each pull request touches, as Google runs it at code review: one mutant
+# per changed line, each against its own crate's tests (scripts/mutants_diff.py). A pull request
+# labelled `bug` mutates every line of the files it changes instead. Advisory: a surviving mutant
+# shows as a warning on its line and in the summary, and the job never fails for one.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: mutants-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      count: ${{ steps.plan.outputs.count }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: rustup toolchain install
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - id: plan
+        env:
+          SCOPE: ${{ contains(github.event.pull_request.labels.*.name, 'bug') && 'files' || 'lines' }}
+        run: python3 scripts/mutants_diff.py "$SCOPE" "origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mutants-plan
+          path: |
+            mutants-run.env
+            mutants-targets.txt
+
+  shard:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: mutants-plan
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutants
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - run: python3 scripts/mutants_shard.py ${{ matrix.shard }} ${{ strategy.job-total }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: target/mutants-shard/mutants.out/*.txt
+
+  report:
+    needs: [plan, shard]
+    if: always() && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: mutants-shard-*
+          path: shards
+      - run: python3 scripts/mutants_diff.py report shards
