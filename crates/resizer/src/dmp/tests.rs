@@ -429,32 +429,12 @@ fn the_partials_of_the_ramp_response_match_its_differences() {
             "cl at {t}: {} {by_cl}",
             partials[2]
         );
-        if t - t0 <= dt {
-            let by_dt = step(&|v| y(t, t0, v, rd, cl), dt);
-            assert!(
-                close(partials[1], by_dt, 1e-2),
-                "dt at {t}: {} {by_dt}",
-                partials[1]
-            );
-        }
-    }
-}
-
-#[test]
-fn the_ramp_width_partial_after_the_ramp_is_opensta_s() {
-    let (rd, cl, t0, dt) = (1.0e3, 1.0e-14, 1.0e-11, 2.0e-11);
-    let tau = rd * cl;
-    let y0 = |t: f64| t - tau * (1.0 - (-t / tau).exp());
-    let y0_by_t = |t: f64| 1.0 - (-t / tau).exp();
-    for t in [3.5e-11, 6.0e-11] {
-        let t1 = t - t0;
-
-        let [_, by_dt, _] = dy(t, t0, dt, rd, cl);
-
-        // OpenSTA's `DmpAlg::dy` adds the two `y0` where the derivative of
-        // `y` subtracts them.
-        let expected = -(y0(t1) + y0(t1 - dt)) / (dt * dt) + y0_by_t(t1 - dt) / dt;
-        assert!(close(by_dt, expected, 3e-3), "{t}: {by_dt} {expected}");
+        let by_dt = step(&|v| y(t, t0, v, rd, cl), dt);
+        assert!(
+            close(partials[1], by_dt, 1e-2),
+            "dt at {t}: {} {by_dt}",
+            partials[1]
+        );
     }
 }
 
@@ -897,22 +877,21 @@ fn the_load_slew_is_derated_like_the_driver_slew() {
 }
 
 #[test]
-fn a_ramp_the_search_drives_to_no_width_is_set_back_from_the_thresholds() {
+fn a_zero_c2_fit_the_search_drives_to_no_width_falls_back_to_the_far_capacitance() {
     let arc = linear_arc(85e-12, 257.4e-12, 39e-12, 49.5e-12);
+    let (in_slew, c1) = (149e-12, 184e-15);
     let pi = PiModel {
         c2: Farads::new(1e-18),
         rpi: Ohms::new(500.0),
-        c1: Farads::new(184e-15),
+        c1: Farads::new(c1),
     };
 
-    let delay = gate_delay(&arc, &Thresholds::default(), Seconds::new(149e-12), pi);
+    let delay = gate_delay(&arc, &Thresholds::default(), Seconds::new(in_slew), pi);
 
-    assert!(matches!(delay.model, LoadModel::Fitted(_)));
-    let text = format!(
-        "{} {} {}\n",
-        sci(delay.delay.get()),
-        sci(delay.slew.get()),
-        sci(delay.load_delay_slew(Seconds::new(40e-12)).0.get())
+    let (table_delay, table_slew) = common_for(&arc, in_slew).table(c1);
+    assert!(matches!(delay.model, LoadModel::Lumped));
+    assert_eq!(
+        (delay.delay.get(), delay.slew.get(), delay.ceff.get()),
+        (table_delay, table_slew, c1)
     );
-    assert_golden(&golden_dir(), "a_dmp_zero_c2_reset.txt", &text);
 }
