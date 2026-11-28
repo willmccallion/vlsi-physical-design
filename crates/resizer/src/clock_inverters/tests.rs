@@ -51,3 +51,21 @@ fn each_load_of_a_clock_inverter_gets_its_own_clone_and_a_fixed_one_stays() {
     assert_ne!(driver_of("f1/CK"), driver_of("f2/CK"));
     assert_eq!(driver_of("f3/CK"), "fixed/ZN");
 }
+
+#[test]
+fn the_net_a_replaced_inverter_drove_goes_with_it() {
+    let mut db = inverted_clocks();
+    let lib = cells(&clock_cells_source());
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let clocks = {
+        let netlist = Netlist::new(&db, &link);
+        let constants = Constants::find(&netlist);
+        ClockNetwork::from_ports(&netlist, &["clk".to_string()], &constants).unwrap()
+    };
+
+    let done = repair_clock_inverters(&mut db, &link, &clocks, &mut Namer::new()).unwrap();
+
+    assert!(db.net_id("clkn").is_none());
+    assert!(db.net_id("clkf").is_some());
+    assert!(done.renumbering.is_some());
+}

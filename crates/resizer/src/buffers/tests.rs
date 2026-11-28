@@ -1,5 +1,9 @@
 use super::*;
-use crate::testing::{DefSections, cells, clock_cells_source, def_text, design, pin};
+use crate::testing::{
+    DefSections, cells, cells_with, clock_cells_source, def_text, design, design_with_copies, pin,
+};
+use pare_common::db::liberty::Liberty;
+use pare_common::db::library::SignalUse;
 use pare_common::db::parser::sdc;
 use std::path::Path;
 
@@ -115,4 +119,199 @@ fn ports_driving_or_driven_by_logic_get_a_buffer_once_the_buffers_are_gone() {
     let port_net = |port: &str| db.io_pins[db.io_pin_id(port).unwrap()].net;
     assert_eq!(db.nets[port_net("in0")].name, "in0");
     assert_eq!(db.nets[port_net("in0")].pins.len(), 2);
+}
+
+#[test]
+fn a_buffer_joins_the_net_it_survives_by_its_ports() {
+    let db = buffered();
+    let lib = cells(&clock_cells_source());
+    let link = Link::new(&db, &lib, &[]).unwrap();
+    let netlist = Netlist::new(&db, &link);
+    let net = |name: &str| db.net_id(name).unwrap();
+
+    let merged = |in_net: &str, out_net: &str| {
+        let merge = merged_nets(&netlist, net(in_net), net(out_net));
+        (merge.survivor, merge.removed)
+    };
+
+    // `in0` and `out0` reach ports; `n0` and `n1` do not.
+    assert_eq!(merged("n0", "in0"), (net("in0"), net("n0")));
+    assert_eq!(merged("in0", "n0"), (net("in0"), net("n0")));
+    assert_eq!(merged("in0", "out0"), (net("in0"), net("out0")));
+    assert_eq!(merged("n0", "n1"), (net("n0"), net("n1")));
+}
+
+/// An inverter `inv` from input port `a` to output port `z`, with the
+/// cells `extra`.
+fn port_chain(extra_cells: &str, z_net: &str, copies: &[(&str, &str)]) -> NetlistDB {
+    design_with_copies(
+        &def_text(
+            "ports",
+            &DefSections {
+                components: &format!("- inv INV_X1 + PLACED ( 2000 2800 ) N ;\n{extra_cells}"),
+                nets: &format!("- a ( PIN a ) ( inv A ) ;\n{z_net}"),
+                inputs: &["a"],
+                outputs: &["z"],
+            },
+        ),
+        copies,
+    )
+}
+
+const INV_TO_Z: &str = "- z ( inv ZN ) ( PIN z ) ;\n";
+
+/// What `buffer_ports` adds to `db` over `lib`, by the lowest-drive buffer
+/// of its library.
+fn buffer_ports_of(db: &mut NetlistDB, lib: &Liberty) -> PortBuffers {
+    let link = Link::new(db, lib, &[]).unwrap();
+    let buffers = link.find_buffers(db).unwrap();
+    let (clocks, constants) = {
+        let netlist = Netlist::new(db, &link);
+        let constants = Constants::find(&netlist);
+        let clocks = ClockNetwork::from_ports(&netlist, &[], &constants).unwrap();
+        (clocks, constants)
+    };
+    buffer_ports(db, &link, &buffers, &clocks, &constants, &mut Namer::new()).unwrap()
+}
+
+fn net_of(db: &NetlistDB, pin_name: &str) -> String {
+    db.nets[db.pins[pin(db, pin_name)].net].name.clone()
+}
+
+#[test]
+fn a_buffer_sits_between_each_port_and_the_logic_it_serves() {
+    let mut db = port_chain("", INV_TO_Z, &[]);
+    let lib = cells(&clock_cells_source());
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(
+        added,
+        PortBuffers {
+            inputs: 1,
+            outputs: 1
+        }
+    );
+    assert_eq!(net_of(&db, "input1/A"), "a");
+    assert_eq!(net_of(&db, "input1/Z"), net_of(&db, "inv/A"));
+    assert_eq!(net_of(&db, "output2/A"), net_of(&db, "inv/ZN"));
+    assert_eq!(net_of(&db, "output2/Z"), "z");
+    assert_ne!(net_of(&db, "inv/ZN"), "z");
+}
+
+#[test]
+fn an_input_port_on_a_power_net_gets_no_buffer() {
+    let mut db = port_chain("", INV_TO_Z, &[]);
+    let net = db.net_id("a").unwrap();
+    db.nets[net].signal_use = SignalUse::Power;
+    let lib = cells(&clock_cells_source());
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(
+        added,
+        PortBuffers {
+            inputs: 0,
+            outputs: 1
+        }
+    );
+}
+
+#[test]
+fn an_output_port_on_a_ground_net_gets_no_buffer() {
+    let mut db = port_chain("", INV_TO_Z, &[]);
+    let net = db.net_id("z").unwrap();
+    db.nets[net].signal_use = SignalUse::Ground;
+    let lib = cells(&clock_cells_source());
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(
+        added,
+        PortBuffers {
+            inputs: 1,
+            outputs: 0
+        }
+    );
+}
+
+#[test]
+fn an_output_port_a_tie_cell_holds_gets_no_buffer() {
+    let mut db = port_chain(
+        "- lo TIELO + PLACED ( 6000 2800 ) N ;\n",
+        "- z ( lo ZN ) ( PIN z ) ;\n- w ( inv ZN ) ;\n",
+        &[("INV_X1", "TIELO")],
+    );
+    let lib = cells_with(
+        "cell (TIELO) { area : 0.53 ; pin (ZN) { direction : output ; function : \"0\" ; } }",
+    );
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(added.outputs, 0);
+    assert_eq!(added.inputs, 1);
+}
+
+#[test]
+fn an_output_port_a_tristate_driver_feeds_gets_no_buffer() {
+    let mut db = port_chain(
+        "- tb TBUF + PLACED ( 6000 2800 ) N ;\n",
+        "- z ( tb Z ) ( PIN z ) ;\n- w ( inv ZN ) ( tb A ) ( tb B ) ;\n",
+        &[("AND2_X1", "TBUF")],
+    );
+    let lib = cells_with(
+        "cell (TBUF) { area : 0.8 ; \
+         pin (A) { direction : input ; capacitance : 1.0 ; } \
+         pin (B) { direction : input ; capacitance : 1.0 ; } \
+         pin (Z) { direction : output ; function : \"A\" ; three_state : \"B\" ; } }",
+    );
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(added.outputs, 0);
+}
+
+#[test]
+fn an_output_port_a_protected_cell_drives_gets_no_buffer() {
+    let mut db = port_chain(
+        "- keep KEEP + PLACED ( 6000 2800 ) N ;\n",
+        "- z ( keep ZN ) ( PIN z ) ;\n- w ( inv ZN ) ( keep A ) ;\n",
+        &[("INV_X1", "KEEP")],
+    );
+    let lib = cells_with(
+        "cell (KEEP) { area : 0.53 ; dont_touch : true ; \
+         pin (A) { direction : input ; capacitance : 1.6 ; } \
+         pin (ZN) { direction : output ; function : \"!A\" ; } }",
+    );
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(added.outputs, 0);
+}
+
+#[test]
+fn an_input_port_that_feeds_a_protected_cell_gets_no_buffer() {
+    let mut db = design_with_copies(
+        &def_text(
+            "ports",
+            &DefSections {
+                components: "- inv INV_X1 + PLACED ( 2000 2800 ) N ;\n\
+                             - keep KEEP + PLACED ( 6000 2800 ) N ;\n",
+                nets: "- a ( PIN a ) ( inv A ) ( keep A ) ;\n\
+                       - z ( inv ZN ) ( PIN z ) ;\n- w ( keep ZN ) ;\n",
+                inputs: &["a"],
+                outputs: &["z"],
+            },
+        ),
+        &[("INV_X1", "KEEP")],
+    );
+    let lib = cells_with(
+        "cell (KEEP) { area : 0.53 ; dont_touch : true ; \
+         pin (A) { direction : input ; capacitance : 1.6 ; } \
+         pin (ZN) { direction : output ; function : \"!A\" ; } }",
+    );
+
+    let added = buffer_ports_of(&mut db, &lib);
+
+    assert_eq!(added.inputs, 0);
 }
