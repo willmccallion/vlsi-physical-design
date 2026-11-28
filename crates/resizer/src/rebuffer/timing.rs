@@ -513,14 +513,14 @@ pub(super) struct Frontier {
 }
 
 impl Frontier {
-    pub(super) fn new(area: Option<(Fixed, &Bnet)>, capacity: usize) -> Self {
+    pub(super) fn new(area: Option<(Fixed, &Bnet)>) -> Self {
         Self {
             area_threshold: area.map(|(threshold, _)| threshold),
             envelope: area.map(|(threshold, exemplar)| exemplar.metrics().with_slack(threshold)),
             assured: area.is_none(),
             best_area: CellArea::INFINITY,
             best_slack: -Fixed::INF,
-            kept: Vec::with_capacity(capacity),
+            kept: Vec::new(),
         }
     }
 

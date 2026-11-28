@@ -22,7 +22,7 @@ impl Rebuffer {
         next_segment: Dbu,
         area: Option<(Fixed, &Bnet)>,
     ) -> Frontier {
-        let mut frontier = Frontier::new(area, options.len() * 2);
+        let mut frontier = Frontier::new(area);
         let Some(strong) = self.sizes.last().copied() else {
             return frontier;
         };
