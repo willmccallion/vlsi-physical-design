@@ -290,8 +290,8 @@ impl LayerMetal {
             .max(self.min_spacing);
         for rule in &self.ranges {
             let applies = |w: Dbu| rule.min_width <= w && w <= rule.max_width;
-            if (applies(w1) || applies(w2)) && rule.spacing > required {
-                required = rule.spacing;
+            if applies(w1) || applies(w2) {
+                required = required.max(rule.spacing);
             }
         }
         required
