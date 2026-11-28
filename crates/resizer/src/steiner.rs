@@ -403,9 +403,10 @@ pub(crate) fn is_valid(tree: &SteinerTree) -> bool {
     let corners = |r: &(Point<Dbu>, Point<Dbu>)| {
         [r.0, r.1, Point::new(r.0.x, r.1.y), Point::new(r.1.x, r.0.y)]
     };
-    for i in 0..rects.len() {
-        for j in (i + 1)..rects.len() {
-            let (r, s) = (&rects[i], &rects[j]);
+    let mut rest = rects.as_slice();
+    while let Some((r, later)) = rest.split_first() {
+        rest = later;
+        for s in later {
             if length_zero(r) || length_zero(s) || !intersects(r, s) {
                 continue;
             }
