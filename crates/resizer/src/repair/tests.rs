@@ -728,17 +728,23 @@ fn a_driver_of_each_kind() -> NetlistDB {
                              - g AND2_X1 + PLACED ( 14000 2800 ) N ;\n\
                              - f DFF_X1 + PLACED ( 18000 2800 ) N ;\n\
                              - s IDEAL + PLACED ( 24000 2800 ) N ;\n\
-                             - sl SLOWSLEW + PLACED ( 30000 2800 ) N ;\n",
+                             - sl SLOWSLEW + PLACED ( 30000 2800 ) N ;\n\
+                             - fl FLATSLEW + PLACED ( 36000 2800 ) N ;\n",
                 nets: "- in ( PIN in ) ( cb A ) ( g B ) ;\n- n1 ( cb Z ) ( b A ) ;\n\
                        - n2 ( b Z ) ( i A ) ;\n- n3 ( i ZN ) ( g A ) ;\n\
                        - n4 ( g Z ) ( f D ) ;\n- clk ( PIN clk ) ( f CK ) ;\n\
                        - n5 ( f Q ) ( s A ) ;\n- out ( s Z ) ( PIN out ) ;\n\
-                       - slin ( PIN slin ) ( sl A ) ;\n- slout ( sl Z ) ( PIN slout ) ;\n",
-                inputs: &["in", "clk", "slin"],
-                outputs: &["out", "slout"],
+                       - slin ( PIN slin ) ( sl A ) ;\n- slout ( sl Z ) ( PIN slout ) ;\n\
+                       - flin ( PIN flin ) ( fl A ) ;\n- flout ( fl Z ) ( PIN flout ) ;\n",
+                inputs: &["in", "clk", "slin", "flin"],
+                outputs: &["out", "slout", "flout"],
             },
         ),
-        &[("BUF_X1", "IDEAL"), ("BUF_X1", "SLOWSLEW")],
+        &[
+            ("BUF_X1", "IDEAL"),
+            ("BUF_X1", "SLOWSLEW"),
+            ("BUF_X1", "FLATSLEW"),
+        ],
     )
 }
 
@@ -753,6 +759,17 @@ const SLOWSLEW_BUFFER: &str = "cell (SLOWSLEW) { area : 0.8 ;
             rise_transition (delay_t) { values (\"0.01, 0.05\", \"0.01, 0.05\") ; }
             fall_transition (delay_t) { values (\"0.01, 0.05\", \"0.01, 0.05\") ; } } } }";
 
+/// A buffer whose delay climbs with its load but whose slew is flat, so that
+/// no load gives a slew over it.
+const FLATSLEW_BUFFER: &str = "cell (FLATSLEW) { area : 0.8 ;
+        pin (A) { direction : input ; capacitance : 0.97 ; }
+        pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 6000.0 ;
+          timing () { related_pin : \"A\" ; timing_sense : positive_unate ;
+            cell_rise (delay_t) { values (\"0.1, 1.0\", \"0.1, 1.0\") ; }
+            cell_fall (delay_t) { values (\"0.1, 1.0\", \"0.1, 1.0\") ; }
+            rise_transition (delay_t) { values (\"0.01, 0.01\", \"0.01, 0.01\") ; }
+            fall_transition (delay_t) { values (\"0.01, 0.01\", \"0.01, 0.01\") ; } } } }";
+
 /// A buffer whose delay and slew do not depend on its load.
 const IDEAL_BUFFER: &str = "cell (IDEAL) { area : 0.8 ;
         pin (A) { direction : input ; capacitance : 0.97 ; }
@@ -766,14 +783,16 @@ const IDEAL_BUFFER: &str = "cell (IDEAL) { area : 0.8 ;
 #[test]
 fn the_load_that_gives_a_driver_a_slew_is_as_found_for_each_kind_of_cell_and_slew() {
     let mut db = a_driver_of_each_kind();
-    let drivers = ["cb/Z", "b/Z", "i/ZN", "g/Z", "f/Q", "sl/Z"].map(|name| pin(&db, name));
+    let drivers = ["cb/Z", "b/Z", "i/ZN", "g/Z", "f/Q", "sl/Z", "fl/Z"].map(|name| pin(&db, name));
     let ideal = pin(&db, "s/Z");
     let port = db.io_pins[db.io_pin_id("in").unwrap()].pin;
     let mut lines = String::new();
 
     with_wired_session(
         &mut db,
-        &crate::testing::cells_with(&format!("{IDEAL_BUFFER}\n{SLOWSLEW_BUFFER}")),
+        &crate::testing::cells_with(&format!(
+            "{IDEAL_BUFFER}\n{SLOWSLEW_BUFFER}\n{FLATSLEW_BUFFER}"
+        )),
         "",
         |resizer| {
             let repairer = Repairer::new(resizer);
@@ -790,7 +809,8 @@ fn the_load_that_gives_a_driver_a_slew_is_as_found_for_each_kind_of_cell_and_sle
                     let reached =
                         |cap: Farads| gate_slew(cell, port, &repairer.resizer.targets.slews, cap);
                     assert!(found >= Farads::ZERO);
-                    if found > Farads::ZERO {
+                    // A slew no load reaches runs the search out to its cap.
+                    if found > Farads::ZERO && found.get() < 1.0 {
                         assert!(reached(found) <= slew, "{slew_ps} ps");
                         assert!(reached(found * 1.011) >= slew, "{slew_ps} ps");
                     }
@@ -1275,6 +1295,15 @@ fn an_outputs_slew_violation_counts_only_the_arcs_into_that_output() {
     );
 }
 
+/// The clock cells with their buffers protected from resizing, and `extra`.
+fn untouchable_cells(extra: &str) -> Liberty {
+    let source = clock_cells_source()
+        .replacen("area : 1.33 ;", "area : 1.33 ; dont_touch : true ;", 1)
+        .replacen("area : 0.8 ;", "area : 0.8 ; dont_touch : true ;", 1);
+    let end = source.rfind('}').unwrap();
+    cells(&format!("{}{extra}\n}}\n", &source[..end]))
+}
+
 /// An inverter, in a class of its own, whose input loads `ff` femtofarads.
 fn inverter_of(name: &str, ff: f64) -> String {
     HEAVY_INVERTER
@@ -1307,45 +1336,39 @@ fn junction_buffer(a_ff: f64, b_ff: f64, max_cap_ff: f64) -> (String, String, St
         inverter_of("SINK_B", b_ff)
     );
     let mut found = None;
-    with_wired_session(
-        &mut db,
-        &crate::testing::cells_with(&extra),
-        "",
-        |resizer| {
-            let at = Point::new(Dbu::new(4000), Dbu::new(2800));
-            let load = |name: &str| {
-                let pin = pin(resizer.db, name);
-                bnet::Bnet::load(at, pin, bnet::LoadModel::load(&*resizer, pin))
-            };
-            let tree = bnet::Bnet::junction(at, load("s1/A"), load("s2/A"));
-            let lowest = resizer.buffers.lowest_drive;
-            let name = |resizer: &Resizer<'_, crate::sta::Sta>, id| {
-                resizer.link.liberty.cell(id).name.clone()
-            };
-            let sum = resizer
-                .find_target_buffer(lowest, femtofarads(a_ff + b_ff))
-                .unwrap();
-            let diff = resizer
-                .find_target_buffer(lowest, femtofarads((a_ff - b_ff).abs()))
-                .unwrap();
-            let (sum, diff) = (name(resizer, sum.id), name(resizer, diff.id));
-            let mut repairer = Repairer::new(resizer);
-            let driver = tree_driver(0.0, max_cap_ff);
+    with_wired_session(&mut db, &untouchable_cells(&extra), "", |resizer| {
+        let at = Point::new(Dbu::new(4000), Dbu::new(2800));
+        let load = |name: &str| {
+            let pin = pin(resizer.db, name);
+            bnet::Bnet::load(at, pin, bnet::LoadModel::load(&*resizer, pin))
+        };
+        let tree = bnet::Bnet::junction(at, load("s1/A"), load("s2/A"));
+        let lowest = resizer.buffers.lowest_drive;
+        let name =
+            |resizer: &Resizer<'_, crate::sta::Sta>, id| resizer.link.liberty.cell(id).name.clone();
+        let sum = resizer
+            .find_target_buffer(lowest, femtofarads(a_ff + b_ff))
+            .unwrap();
+        let diff = resizer
+            .find_target_buffer(lowest, femtofarads((a_ff - b_ff).abs()))
+            .unwrap();
+        let (sum, diff) = (name(resizer, sum.id), name(resizer, diff.id));
+        let mut repairer = Repairer::new(resizer);
+        let driver = tree_driver(0.0, max_cap_ff);
 
-            let _ = repairer.repair_branch(&tree, driver).unwrap();
+        let _ = repairer.repair_branch(&tree, driver).unwrap();
 
-            let inserted = repairer.resizer.db.cell_id("max_cap1").unwrap();
-            let placed = repairer
-                .resizer
-                .link
-                .cell(repairer.resizer.db, inserted)
-                .unwrap()
-                .1
-                .name
-                .clone();
-            found = Some((placed, sum, diff));
-        },
-    );
+        let inserted = repairer.resizer.db.cell_id("max_cap1").unwrap();
+        let placed = repairer
+            .resizer
+            .link
+            .cell(repairer.resizer.db, inserted)
+            .unwrap()
+            .1
+            .name
+            .clone();
+        found = Some((placed, sum, diff));
+    });
     found.unwrap()
 }
 
