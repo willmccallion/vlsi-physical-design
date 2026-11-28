@@ -1,20 +1,26 @@
 //! What the placer keeps, whatever the placement it starts from: each
 //! legalizer leaves no cell overlapping another, off its row or off the site
 //! grid, by the independent checker of the verify crate, and moves no fixed
-//! block; and the improvers keep a legal placement legal without
-//! lengthening its wire.
+//! block; the improvers keep a legal placement legal without lengthening
+//! its wire; and global placement repeats itself and keeps to the core.
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use pare_common::config::{Share, TargetDensity};
 use pare_common::db::design::NetlistDB;
 use pare_common::geom::dbu::Dbu;
 use pare_common::geom::orient::Orientation;
 use pare_common::geom::point::Point;
+use pare_common::geom::rect::Rect;
 use pare_common::testing::designs;
+use pare_placer::global::{self, GlobalParams, NoTiming};
 use pare_placer::legalize::abacus;
 use pare_placer::legalize::opendp::detailed_placement;
 use pare_placer::legalize::opendp::improve::{MaxDisplacement, improve_placement};
 use pare_placer::legalize::opendp::mirror::{hpwl, optimize_mirroring};
+use pare_placer::model::PlacementModel;
 use pare_placer::zones::Zones;
 use pare_verify::placement::placement_violations;
 use proptest::prelude::*;
@@ -77,6 +83,31 @@ fn assert_blocks_stay(db: &NetlistDB, blocks: &[(i64, i64)]) -> Result<(), TestC
         prop_assert_eq!((block.location.x.get(), block.location.y.get()), (x, y));
     }
     Ok(())
+}
+
+/// Settings for placing the ring at a 0.7 target density, as the golden
+/// tests of global placement do, from `seed`.
+const fn global_params(seed: u64) -> GlobalParams {
+    GlobalParams {
+        target_density: TargetDensity::new(0.7).unwrap(),
+        target_overflow: Share::new(0.1).unwrap(),
+        max_iterations: 400,
+        initial_rounds: global::INITIAL_PLACE_ROUNDS,
+        bins: 32,
+        seed,
+        routability: None,
+        timing: None,
+    }
+}
+
+/// The ring of `gates` placed globally from `seed`.
+fn globally_placed(gates: usize, seed: u64) -> NetlistDB {
+    let mut db = common::ring(gates);
+    let mut model = PlacementModel::from_db(&db, &Zones::new(&db).unwrap());
+    let _ =
+        global::place::<NoTiming>(&mut model, &global_params(seed), None, None, |_| {}).unwrap();
+    model.write_back(&mut db);
+    db
 }
 
 fn config(cases: u32, seed: u64) -> Config {
@@ -146,5 +177,25 @@ proptest! {
             prop_assert_eq!(cell.location, at, "{} moved", cell.name);
         }
         prop_assert!(hpwl(&db) <= hpwl_before, "{:?} after {:?}", hpwl(&db), hpwl_before);
+    }
+}
+
+proptest! {
+    #![proptest_config(config(8, 59))]
+
+    #[test]
+    fn global_placement_repeats_itself_for_a_seed_and_keeps_every_cell_in_the_core(
+        gates in 20..240_usize,
+        seed in 0..1000_u64,
+    ) {
+        let db = globally_placed(gates, seed);
+
+        prop_assert_eq!(spots(&globally_placed(gates, seed)), spots(&db));
+        let core = db.core_area();
+        for cell in &db.cells {
+            let size = db.library.cell_macro(cell.macro_id).size;
+            let footprint = Rect::new(cell.location, cell.location + size);
+            prop_assert!(core.encloses(&footprint), "{} at {:?} outside {core:?}", cell.name, cell.location);
+        }
     }
 }
