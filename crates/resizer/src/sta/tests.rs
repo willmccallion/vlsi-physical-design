@@ -1583,3 +1583,16 @@ fn assert_cycle_accounting_makes_sense(
         "{launch:?} {target:?}"
     );
 }
+
+#[test]
+fn a_latch_whose_clock_opens_and_closes_together_has_no_window_to_borrow_in() {
+    let constraints = "create_clock -name clk -period 2.0 -waveform {0.5 0.5} [get_ports clk]\n\
+                       set_input_delay 2.05 -clock clk [get_ports in]\n";
+
+    let (rise, fall) = latch_output_arrivals("LAT", None, &latch_cells(), constraints);
+
+    // Rising data's setup is negative, so it borrows what it needs, a cycle
+    // later than it arrives; falling data's is positive, and nothing is left.
+    assert!(rise.is_some_and(|t| is_ns(t, 0.65)), "{rise:?}");
+    assert!(fall.is_some_and(|t| is_ns(t, 0.6)), "{fall:?}");
+}
