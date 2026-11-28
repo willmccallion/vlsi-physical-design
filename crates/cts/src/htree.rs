@@ -14,7 +14,7 @@
 
 use crate::capacitance::Farads32;
 use crate::clock::{Clock, InstRef};
-use crate::kmeans::{Clustering, SinkPoint};
+use crate::kmeans::{Clustering, SinkPoint, centroid};
 use crate::options::{
     CLOCK_TREE_MAX_DEPTH, CLUSTERING_CAPACITY, CLUSTERING_POWER,
     FANOUT_LIMITED_CLUSTERING_CAPACITY, MACRO_SINK_CLUSTERING_SIZE, MAX_DIAMETER, MAX_LEAF_SINKS,
@@ -618,8 +618,11 @@ impl Builder {
             if cluster.len() == 1 {
                 top_level.push(sinks[cluster[0]], InstRef::Sink(cluster[0]));
             }
-            if cluster.len() > 1 {
-                let (point, buffer) = self.add_leaf_buffer(ctx, sinks, cluster, count);
+            if cluster.len() > 1
+                && let Some((x, y)) = centroid(cluster.iter().map(|&s| sinks[s]))
+            {
+                let center = TreePoint::new(x, y);
+                let (point, buffer) = self.add_leaf_buffer(ctx, center, cluster, count);
                 top_level.push(point, buffer);
             }
         }
@@ -712,22 +715,15 @@ impl Builder {
         matching.solution().to_vec()
     }
 
-    /// Puts leaf buffer `count` at the legalized center of the sinks of
+    /// Puts leaf buffer `count` at the legalized `center` of the sinks of
     /// `cluster`, driving them; returns where it went and the buffer.
     fn add_leaf_buffer(
         &mut self,
         ctx: &TreeContext<'_>,
-        sinks: &[SinkPoint],
+        center: TreePoint,
         cluster: &[usize],
         count: usize,
     ) -> (SinkPoint, InstRef) {
-        let (mut x_sum, mut y_sum) = (0.0_f32, 0.0_f32);
-        for &idx in cluster {
-            x_sum += sinks[idx].x;
-            y_sum += sinks[idx].y;
-        }
-        let n = cluster.len() as f32;
-        let center = TreePoint::new(f64::from(x_sum / n), f64::from(y_sum / n));
         let legal = self.legalize_one_buffer(ctx, center, ctx.sink_buffer);
         self.commit_move(center, legal);
         let location = legal.to_dbu(self.unit());
