@@ -1,0 +1,2000 @@
+case 0 driver 1 alpha 0.3
+  points (2,3) (1,1)
+  nodes (2,3) (1,1)
+  parents [Some(1), None]
+  length 3 valid true
+case 1 driver 0 alpha 0
+  points (3,0) (4,3) (6,3)
+  nodes (3,0) (4,3) (6,3)
+  parents [None, Some(0), Some(1)]
+  length 6 valid true
+case 2 driver 0 alpha 1
+  points (2,20) (9,22) (15,9) (6,11)
+  nodes (2,20) (9,22) (15,9) (6,11) (6,20)
+  parents [None, Some(4), Some(3), Some(4), Some(0)]
+  length 29 valid true
+case 3 driver 2 alpha 0.6
+  points (193,54) (98,53) (104,40) (145,93) (32,152)
+  nodes (193,54) (98,53) (104,40) (145,93) (32,152) (145,54) (104,53)
+  parents [Some(5), Some(6), None, Some(5), Some(1), Some(6), Some(2)]
+  length 313 valid true
+case 4 driver 2 alpha 0.3
+  points (2,1) (5,5) (3,1) (4,0) (1,5) (4,2)
+  nodes (2,1) (5,5) (3,1) (4,0) (1,5) (4,2) (4,1)
+  parents [Some(2), Some(5), None, Some(6), Some(0), Some(6), Some(2)]
+  length 13 valid true
+case 5 driver 1 alpha 0
+  points (0,0) (0,2) (2,0) (2,1) (0,2) (3,0) (0,2)
+  nodes (0,0) (0,2) (2,0) (2,1) (0,2) (3,0) (0,2)
+  parents [Some(1), None, Some(0), Some(2), Some(1), Some(2), Some(4)]
+  length 6 valid true
+case 6 driver 6 alpha 1
+  points (7,5) (3,4) (3,1) (4,3) (0,2) (1,6) (6,3) (0,5)
+  nodes (7,5) (3,4) (3,1) (4,3) (0,2) (1,6) (6,3) (0,5) (1,5) (3,2) (3,3)
+  parents [Some(6), Some(10), Some(9), Some(6), Some(9), Some(8), None, Some(8), Some(1), Some(10), Some(3)]
+  length 17 valid true
+case 7 driver 4 alpha 0.6
+  points (1,20) (24,12) (5,26) (12,7) (29,8) (7,29) (19,15) (21,7) (4,28)
+  nodes (1,20) (24,12) (5,26) (12,7) (29,8) (7,29) (19,15) (21,7) (4,28) (24,8) (5,20) (5,28)
+  parents [Some(10), Some(9), Some(10), Some(7), None, Some(11), Some(1), Some(9), Some(11), Some(4), Some(6), Some(2)]
+  length 65 valid true
+case 8 driver 2 alpha 0.3
+  points (115,76) (125,183) (16,6) (85,172) (131,51) (155,104) (94,71) (81,3) (28,0) (5,54)
+  nodes (115,76) (125,183) (16,6) (85,172) (131,51) (155,104) (94,71) (81,3) (28,0) (5,54) (131,76) (94,172) (94,76) (28,3)
+  parents [Some(12), Some(11), None, Some(11), Some(10), Some(10), Some(7), Some(13), Some(13), Some(2), Some(0), Some(12), Some(6), Some(2)]
+  length 477 valid true
+case 9 driver 9 alpha 0
+  points (5,2) (5,5) (2,4) (0,2) (0,2) (2,5) (3,4) (5,1) (3,5) (3,5) (3,1)
+  nodes (5,2) (5,5) (2,4) (0,2) (0,2) (2,5) (3,4) (5,1) (3,5) (3,5) (3,1)
+  parents [Some(1), Some(9), Some(5), Some(4), Some(2), Some(8), Some(2), Some(0), Some(9), None, Some(7)]
+  length 15 valid true
+case 10 driver 5 alpha 1
+  points (0,0) (0,3) (2,1) (1,2) (1,3) (1,2) (3,1) (1,1) (3,0) (1,2) (3,0) (0,3)
+  nodes (0,0) (0,3) (2,1) (1,2) (1,3) (1,2) (3,1) (1,1) (3,0) (1,2) (3,0) (0,3)
+  parents [Some(7), Some(11), Some(7), Some(5), Some(9), None, Some(2), Some(3), Some(10), Some(5), Some(6), Some(4)]
+  length 8 valid true
+case 11 driver 4 alpha 0.6
+  points (6,7) (2,7) (2,7) (2,2) (6,4) (5,6) (0,1) (1,0) (5,3) (1,6) (5,6) (4,5) (0,3)
+  nodes (6,7) (2,7) (2,7) (2,2) (6,4) (5,6) (0,1) (1,0) (5,3) (1,6) (5,6) (4,5) (0,3) (2,3) (6,6) (5,4)
+  parents [Some(14), Some(2), Some(0), Some(13), None, Some(14), Some(12), Some(3), Some(15), Some(11), Some(5), Some(15), Some(13), Some(8), Some(4), Some(4)]
+  length 27 valid true
+case 12 driver 1 alpha 0.3
+  points (16,0) (28,27) (6,1) (26,0) (28,21) (29,10) (21,12) (21,20) (10,19) (20,18) (0,5) (17,22) (13,13) (11,21)
+  nodes (16,0) (28,27) (6,1) (26,0) (28,21) (29,10) (21,12) (21,20) (10,19) (20,18) (0,5) (17,22) (13,13) (11,21) (20,13) (28,20) (28,10) (20,20) (17,21)
+  parents [Some(3), None, Some(0), Some(16), Some(1), Some(16), Some(14), Some(15), Some(13), Some(17), Some(2), Some(18), Some(14), Some(18), Some(9), Some(4), Some(15), Some(7), Some(17)]
+  length 99 valid true
+case 13 driver 6 alpha 0
+  points (104,55) (41,12) (133,134) (20,22) (161,13) (44,160) (84,42) (174,54) (181,70) (160,131) (198,64) (77,190) (167,140) (165,12) (139,187)
+  nodes (104,55) (41,12) (133,134) (20,22) (161,13) (44,160) (84,42) (174,54) (181,70) (160,131) (198,64) (77,190) (167,140) (165,12) (139,187) (41,22) (165,54) (174,70) (167,131) (139,134) (77,187) (165,13) (104,54)
+  parents [Some(22), Some(15), Some(19), Some(15), Some(21), Some(20), None, Some(16), Some(17), Some(18), Some(8), Some(20), Some(18), Some(21), Some(19), Some(6), Some(22), Some(7), Some(17), Some(9), Some(14), Some(16), Some(6)]
+  length 581 valid true
+case 14 driver 12 alpha 1
+  points (0,4) (0,3) (0,0) (5,0) (1,2) (5,4) (4,5) (0,5) (0,2) (5,2) (2,1) (1,2) (5,1) (3,4) (0,0) (4,1)
+  nodes (0,4) (0,3) (0,0) (5,0) (1,2) (5,4) (4,5) (0,5) (0,2) (5,2) (2,1) (1,2) (5,1) (3,4) (0,0) (4,1) (4,4)
+  parents [Some(1), Some(8), Some(14), Some(12), Some(11), Some(9), Some(16), Some(0), Some(4), Some(12), Some(15), Some(9), None, Some(16), Some(10), Some(12), Some(5)]
+  length 21 valid true
+case 15 driver 0 alpha 0.6
+  points (3,1) (2,0)
+  nodes (3,1) (2,0)
+  parents [None, Some(0)]
+  length 2 valid true
+case 16 driver 2 alpha 0.3
+  points (2,6) (0,5) (3,1)
+  nodes (2,6) (0,5) (3,1) (2,5)
+  parents [Some(3), Some(3), None, Some(2)]
+  length 8 valid true
+case 17 driver 0 alpha 0
+  points (27,14) (28,24) (27,5) (9,20)
+  nodes (27,14) (28,24) (27,5) (9,20) (27,20)
+  parents [None, Some(4), Some(0), Some(4), Some(0)]
+  length 38 valid true
+case 18 driver 4 alpha 1
+  points (57,160) (9,68) (79,92) (111,107) (166,149)
+  nodes (57,160) (9,68) (79,92) (111,107) (166,149) (111,149)
+  parents [Some(5), Some(2), Some(3), Some(5), None, Some(4)]
+  length 303 valid true
+case 19 driver 3 alpha 0.6
+  points (3,1) (1,2) (0,2) (1,4) (1,1) (0,2)
+  nodes (3,1) (1,2) (0,2) (1,4) (1,1) (0,2)
+  parents [Some(4), Some(3), Some(5), None, Some(1), Some(1)]
+  length 6 valid true
+case 20 driver 6 alpha 0.3
+  points (3,3) (3,0) (1,3) (1,2) (2,3) (2,3) (1,1)
+  nodes (3,3) (3,0) (1,3) (1,2) (2,3) (2,3) (1,1)
+  parents [Some(5), Some(6), Some(3), Some(6), Some(2), Some(4), None]
+  length 7 valid true
+case 21 driver 2 alpha 0
+  points (1,5) (6,0) (6,4) (5,3) (3,2) (3,3) (3,6) (3,5)
+  nodes (1,5) (6,0) (6,4) (5,3) (3,2) (3,3) (3,6) (3,5) (6,3)
+  parents [Some(7), Some(8), None, Some(8), Some(5), Some(3), Some(7), Some(5), Some(2)]
+  length 13 valid true
+case 22 driver 7 alpha 1
+  points (19,22) (4,8) (21,29) (0,16) (18,16) (17,26) (14,10) (20,26) (18,18)
+  nodes (19,22) (4,8) (21,29) (0,16) (18,16) (17,26) (14,10) (20,26) (18,18) (14,16) (19,26)
+  parents [Some(10), Some(6), Some(7), Some(9), Some(8), Some(10), Some(9), None, Some(0), Some(4), Some(7)]
+  length 54 valid true
+case 23 driver 3 alpha 0.6
+  points (175,120) (115,113) (39,8) (25,151) (148,151) (165,23) (175,114) (70,140) (102,50) (147,148)
+  nodes (175,120) (115,113) (39,8) (25,151) (148,151) (165,23) (175,114) (70,140) (102,50) (147,148) (115,140) (39,140) (115,50) (115,114)
+  parents [Some(6), Some(13), Some(11), None, Some(9), Some(12), Some(13), Some(11), Some(12), Some(10), Some(7), Some(3), Some(1), Some(10)]
+  length 523 valid true
+case 24 driver 0 alpha 0.3
+  points (3,3) (2,5) (0,3) (2,0) (1,1) (1,0) (0,5) (4,0) (1,2) (2,2) (4,1)
+  nodes (3,3) (2,5) (0,3) (2,0) (1,1) (1,0) (0,5) (4,0) (1,2) (2,2) (4,1) (2,3)
+  parents [None, Some(11), Some(8), Some(5), Some(8), Some(4), Some(1), Some(10), Some(9), Some(11), Some(0), Some(0)]
+  length 16 valid true
+case 25 driver 11 alpha 0
+  points (1,1) (2,2) (0,2) (0,2) (1,1) (2,2) (3,1) (0,2) (1,2) (0,1) (3,1) (1,3)
+  nodes (1,1) (2,2) (0,2) (0,2) (1,1) (2,2) (3,1) (0,2) (1,2) (0,1) (3,1) (1,3) (1,2)
+  parents [Some(4), Some(8), Some(3), Some(7), Some(12), Some(1), Some(10), Some(12), Some(11), Some(0), Some(1), None, Some(8)]
+  length 7 valid true
+case 26 driver 2 alpha 1
+  points (5,3) (2,2) (2,5) (4,5) (1,2) (3,6) (7,1) (3,5) (0,2) (6,1) (0,3) (5,4) (6,0)
+  nodes (5,3) (2,2) (2,5) (4,5) (1,2) (3,6) (7,1) (3,5) (0,2) (6,1) (0,3) (5,4) (6,0) (2,3)
+  parents [Some(11), Some(13), None, Some(7), Some(1), Some(7), Some(9), Some(2), Some(10), Some(0), Some(13), Some(3), Some(9), Some(2)]
+  length 18 valid true
+case 27 driver 3 alpha 0.6
+  points (11,19) (23,8) (8,13) (1,25) (1,8) (15,26) (28,22) (8,27) (21,8) (0,14) (21,26) (24,21) (4,29) (1,24)
+  nodes (11,19) (23,8) (8,13) (1,25) (1,8) (15,26) (28,22) (8,27) (21,8) (0,14) (21,26) (24,21) (4,29) (1,24) (4,27) (1,19) (1,13) (24,22) (1,14)
+  parents [Some(15), Some(8), Some(16), None, Some(16), Some(7), Some(17), Some(14), Some(2), Some(18), Some(5), Some(17), Some(14), Some(3), Some(3), Some(13), Some(18), Some(10), Some(15)]
+  length 92 valid true
+case 28 driver 8 alpha 0.3
+  points (138,95) (128,158) (157,102) (62,132) (187,136) (162,89) (116,12) (34,134) (79,172) (5,111) (183,28) (75,164) (125,41) (16,56) (14,103)
+  nodes (138,95) (128,158) (157,102) (62,132) (187,136) (162,89) (116,12) (34,134) (79,172) (5,111) (183,28) (75,164) (125,41) (16,56) (14,103) (138,136) (138,41) (14,111) (157,95) (75,158) (62,134)
+  parents [Some(15), Some(19), Some(18), Some(20), Some(15), Some(18), Some(12), Some(20), None, Some(17), Some(16), Some(8), Some(16), Some(14), Some(17), Some(1), Some(0), Some(7), Some(0), Some(11), Some(19)]
+  length 569 valid true
+case 29 driver 11 alpha 0
+  points (2,3) (1,1) (4,5) (3,1) (2,0) (1,5) (4,5) (1,4) (4,3) (0,1) (0,4) (0,4) (3,0) (1,0) (0,2) (0,4)
+  nodes (2,3) (1,1) (4,5) (3,1) (2,0) (1,5) (4,5) (1,4) (4,3) (0,1) (0,4) (0,4) (3,0) (1,0) (0,2) (0,4)
+  parents [Some(7), Some(9), Some(8), Some(12), Some(13), Some(7), Some(2), Some(15), Some(0), Some(14), Some(11), None, Some(4), Some(1), Some(10), Some(11)]
+  length 16 valid true
+case 30 driver 0 alpha 1
+  points (0,1) (2,3)
+  nodes (0,1) (2,3)
+  parents [None, Some(0)]
+  length 4 valid true
+case 31 driver 0 alpha 0.6
+  points (4,3) (2,3) (3,1)
+  nodes (4,3) (2,3) (3,1) (3,3)
+  parents [None, Some(3), Some(3), Some(0)]
+  length 4 valid true
+case 32 driver 3 alpha 0.3
+  points (1,2) (0,16) (25,2) (11,22)
+  nodes (1,2) (0,16) (25,2) (11,22) (1,16)
+  parents [Some(4), Some(4), Some(0), None, Some(3)]
+  length 55 valid true
+case 33 driver 4 alpha 0
+  points (109,6) (41,173) (151,49) (50,172) (188,110)
+  nodes (109,6) (41,173) (151,49) (50,172) (188,110) (151,110)
+  parents [Some(2), Some(3), Some(5), Some(5), None, Some(4)]
+  length 356 valid true
+case 34 driver 4 alpha 1
+  points (1,2) (0,2) (5,3) (1,4) (1,1) (2,4)
+  nodes (1,2) (0,2) (5,3) (1,4) (1,1) (2,4) (1,3)
+  parents [Some(4), Some(0), Some(6), Some(6), None, Some(3), Some(0)]
+  length 9 valid true
+case 35 driver 6 alpha 0.6
+  points (0,1) (3,1) (3,3) (1,0) (3,0) (2,3) (3,2)
+  nodes (0,1) (3,1) (3,3) (1,0) (3,0) (2,3) (3,2)
+  parents [Some(1), Some(6), Some(6), Some(4), Some(1), Some(2), None]
+  length 9 valid true
+case 36 driver 6 alpha 0.3
+  points (1,3) (6,6) (1,5) (7,2) (6,1) (5,0) (7,3) (4,2)
+  nodes (1,3) (6,6) (1,5) (7,2) (6,1) (5,0) (7,3) (4,2) (6,2)
+  parents [Some(7), Some(6), Some(0), Some(6), Some(8), Some(4), None, Some(8), Some(3)]
+  length 17 valid true
+case 37 driver 2 alpha 0
+  points (16,25) (12,29) (15,20) (12,4) (4,27) (0,11) (28,21) (8,5) (26,5)
+  nodes (16,25) (12,29) (15,20) (12,4) (4,27) (0,11) (28,21) (8,5) (26,5) (26,20) (12,27) (16,20) (12,5)
+  parents [Some(11), Some(10), None, Some(12), Some(10), Some(7), Some(9), Some(12), Some(9), Some(11), Some(0), Some(2), Some(8)]
+  length 83 valid true
+case 38 driver 1 alpha 1
+  points (120,19) (32,176) (136,37) (142,77) (68,121) (80,55) (191,100) (23,117) (51,188) (96,134)
+  nodes (120,19) (32,176) (136,37) (142,77) (68,121) (80,55) (191,100) (23,117) (51,188) (96,134) (142,100) (68,134) (120,37) (32,134)
+  parents [Some(12), None, Some(12), Some(10), Some(11), Some(4), Some(10), Some(13), Some(1), Some(11), Some(9), Some(13), Some(5), Some(1)]
+  length 498 valid true
+case 39 driver 0 alpha 0.6
+  points (1,2) (1,2) (3,4) (1,0) (1,2) (2,2) (2,2) (5,1) (4,1) (5,2) (2,1)
+  nodes (1,2) (1,2) (3,4) (1,0) (1,2) (2,2) (2,2) (5,1) (4,1) (5,2) (2,1) (3,2)
+  parents [None, Some(0), Some(11), Some(0), Some(1), Some(4), Some(5), Some(8), Some(10), Some(11), Some(5), Some(6)]
+  length 12 valid true
+case 40 driver 7 alpha 0.3
+  points (0,0) (3,3) (1,3) (3,3) (0,2) (1,1) (2,3) (3,1) (0,1) (2,3) (3,0) (1,2)
+  nodes (0,0) (3,3) (1,3) (3,3) (0,2) (1,1) (2,3) (3,1) (0,1) (2,3) (3,0) (1,2)
+  parents [Some(8), Some(7), Some(6), Some(1), Some(11), Some(7), Some(9), None, Some(5), Some(3), Some(7), Some(5)]
+  length 11 valid true
+case 41 driver 9 alpha 0
+  points (1,6) (6,6) (3,6) (2,7) (0,4) (5,3) (6,4) (2,1) (1,5) (1,3) (7,6) (4,7) (1,3)
+  nodes (1,6) (6,6) (3,6) (2,7) (0,4) (5,3) (6,4) (2,1) (1,5) (1,3) (7,6) (4,7) (1,3) (3,7) (1,4)
+  parents [Some(8), Some(11), Some(0), Some(13), Some(14), Some(6), Some(1), Some(9), Some(14), None, Some(1), Some(13), Some(9), Some(2), Some(12)]
+  length 20 valid true
+case 42 driver 13 alpha 1
+  points (21,28) (18,3) (17,21) (19,27) (8,19) (13,12) (6,5) (22,6) (16,5) (23,17) (26,22) (20,0) (8,14) (21,22)
+  nodes (21,28) (18,3) (17,21) (19,27) (8,19) (13,12) (6,5) (22,6) (16,5) (23,17) (26,22) (20,0) (8,14) (21,22) (20,3) (21,6) (16,12) (21,27) (21,17) (16,19) (21,21)
+  parents [Some(17), Some(14), Some(20), Some(17), Some(19), Some(16), Some(8), Some(15), Some(16), Some(18), Some(13), Some(14), Some(4), None, Some(15), Some(18), Some(19), Some(13), Some(20), Some(2), Some(13)]
+  length 88 valid true
+case 43 driver 0 alpha 0.6
+  points (169,65) (6,62) (119,166) (36,167) (61,40) (9,7) (151,111) (83,157) (100,188) (142,190) (111,135) (4,133) (94,65) (36,189) (34,93)
+  nodes (169,65) (6,62) (119,166) (36,167) (61,40) (9,7) (151,111) (83,157) (100,188) (142,190) (111,135) (4,133) (94,65) (36,189) (34,93) (34,65) (142,135) (61,65) (111,157) (151,65) (9,62) (142,188)
+  parents [None, Some(20), Some(18), Some(7), Some(17), Some(20), Some(19), Some(18), Some(21), Some(21), Some(16), Some(14), Some(19), Some(3), Some(15), Some(17), Some(6), Some(12), Some(10), Some(0), Some(15), Some(16)]
+  length 697 valid true
+case 44 driver 10 alpha 0.3
+  points (0,3) (2,5) (5,0) (4,5) (4,4) (5,1) (2,4) (5,5) (0,0) (3,4) (2,4) (3,1) (2,5) (3,5) (1,1) (5,1)
+  nodes (0,3) (2,5) (5,0) (4,5) (4,4) (5,1) (2,4) (5,5) (0,0) (3,4) (2,4) (3,1) (2,5) (3,5) (1,1) (5,1) (3,4)
+  parents [Some(6), Some(10), Some(5), Some(13), Some(9), Some(11), Some(10), Some(3), Some(14), Some(10), None, Some(16), Some(1), Some(16), Some(11), Some(5), Some(9)]
+  length 19 valid true
+case 45 driver 0 alpha 0
+  points (2,0) (2,2)
+  nodes (2,0) (2,2)
+  parents [None, Some(0)]
+  length 2 valid true
+case 46 driver 2 alpha 1
+  points (0,2) (7,6) (7,6)
+  nodes (0,2) (7,6) (7,6)
+  parents [Some(1), Some(2), None]
+  length 11 valid true
+case 47 driver 2 alpha 0.6
+  points (10,20) (28,18) (2,0) (22,17)
+  nodes (10,20) (28,18) (2,0) (22,17) (10,17)
+  parents [Some(4), Some(3), None, Some(4), Some(2)]
+  length 47 valid true
+case 48 driver 0 alpha 0.3
+  points (159,108) (5,2) (189,167) (133,8) (71,29)
+  nodes (159,108) (5,2) (189,167) (133,8) (71,29) (133,29)
+  parents [None, Some(4), Some(0), Some(5), Some(5), Some(0)]
+  length 370 valid true
+case 49 driver 5 alpha 0
+  points (1,0) (0,3) (2,0) (0,4) (3,2) (1,2)
+  nodes (1,0) (0,3) (2,0) (0,4) (3,2) (1,2)
+  parents [Some(5), Some(5), Some(0), Some(1), Some(5), None]
+  length 8 valid true
+case 50 driver 0 alpha 1
+  points (2,3) (0,0) (0,3) (2,1) (1,1) (2,2) (0,2)
+  nodes (2,3) (0,0) (0,3) (2,1) (1,1) (2,2) (0,2)
+  parents [None, Some(4), Some(0), Some(5), Some(3), Some(0), Some(2)]
+  length 8 valid true
+case 51 driver 2 alpha 0.6
+  points (2,7) (3,1) (1,2) (5,3) (5,1) (0,3) (0,3) (0,5)
+  nodes (2,7) (3,1) (1,2) (5,3) (5,1) (0,3) (0,3) (0,5) (1,3)
+  parents [Some(8), Some(2), None, Some(4), Some(1), Some(8), Some(5), Some(6), Some(2)]
+  length 16 valid true
+case 52 driver 4 alpha 0.3
+  points (24,23) (27,22) (2,20) (0,18) (4,9) (18,10) (9,8) (28,27) (18,9)
+  nodes (24,23) (27,22) (2,20) (0,18) (4,9) (18,10) (9,8) (28,27) (18,9) (2,18) (27,23) (9,9)
+  parents [Some(5), Some(10), Some(9), Some(9), None, Some(8), Some(11), Some(10), Some(11), Some(4), Some(0), Some(4)]
+  length 59 valid true
+case 53 driver 5 alpha 0
+  points (197,134) (59,89) (33,61) (163,4) (72,165) (184,95) (66,9) (120,13) (60,135) (55,18)
+  nodes (197,134) (59,89) (33,61) (163,4) (72,165) (184,95) (66,9) (120,13) (60,135) (55,18) (55,61) (163,13) (66,13)
+  parents [Some(5), Some(10), Some(10), Some(11), Some(8), None, Some(12), Some(11), Some(1), Some(12), Some(9), Some(5), Some(7)]
+  length 467 valid true
+case 54 driver 6 alpha 1
+  points (2,4) (5,3) (1,5) (1,2) (0,1) (3,3) (0,2) (2,0) (2,2) (0,5) (3,2)
+  nodes (2,4) (5,3) (1,5) (1,2) (0,1) (3,3) (0,2) (2,0) (2,2) (0,5) (3,2) (2,2)
+  parents [Some(11), Some(5), Some(9), Some(6), Some(6), Some(10), None, Some(11), Some(3), Some(6), Some(8), Some(8)]
+  length 15 valid true
+case 55 driver 7 alpha 0.6
+  points (1,2) (3,3) (2,0) (3,3) (3,1) (2,0) (0,2) (1,3) (1,2) (1,3) (1,1) (0,1)
+  nodes (1,2) (3,3) (2,0) (3,3) (3,1) (2,0) (0,2) (1,3) (1,2) (1,3) (1,1) (0,1)
+  parents [Some(8), Some(9), Some(5), Some(1), Some(1), Some(10), Some(0), None, Some(7), Some(7), Some(0), Some(10)]
+  length 10 valid true
+case 56 driver 7 alpha 0.3
+  points (0,6) (3,6) (0,5) (6,7) (4,2) (6,3) (6,1) (3,4) (4,7) (1,0) (7,7) (4,1) (3,3)
+  nodes (0,6) (3,6) (0,5) (6,7) (4,2) (6,3) (6,1) (3,4) (4,7) (1,0) (7,7) (4,1) (3,3) (4,3)
+  parents [Some(1), Some(7), Some(0), Some(8), Some(13), Some(13), Some(11), None, Some(1), Some(11), Some(3), Some(4), Some(7), Some(12)]
+  length 23 valid true
+case 57 driver 12 alpha 0
+  points (23,5) (4,2) (9,29) (1,15) (27,25) (3,9) (2,14) (10,6) (1,2) (17,23) (9,8) (9,5) (12,13) (24,16)
+  nodes (23,5) (4,2) (9,29) (1,15) (27,25) (3,9) (2,14) (10,6) (1,2) (17,23) (9,8) (9,5) (12,13) (24,16) (24,23) (4,8) (10,8) (10,5)
+  parents [Some(17), Some(15), Some(9), Some(6), Some(14), Some(15), Some(5), Some(16), Some(1), Some(14), Some(16), Some(17), None, Some(0), Some(13), Some(10), Some(12), Some(7)]
+  length 94 valid true
+case 58 driver 10 alpha 1
+  points (134,145) (124,67) (42,143) (147,107) (1,8) (82,169) (193,62) (81,110) (39,5) (6,32) (117,170) (74,134) (5,55) (66,81) (59,35)
+  nodes (134,145) (124,67) (42,143) (147,107) (1,8) (82,169) (193,62) (81,110) (39,5) (6,32) (117,170) (74,134) (5,55) (66,81) (59,35) (81,134) (59,55) (124,145) (81,143) (39,32) (117,169)
+  parents [Some(17), Some(17), Some(18), Some(0), Some(9), Some(20), Some(1), Some(15), Some(19), Some(19), None, Some(15), Some(16), Some(7), Some(16), Some(18), Some(13), Some(20), Some(5), Some(14), Some(10)]
+  length 649 valid true
+case 59 driver 15 alpha 0.6
+  points (5,5) (5,2) (1,3) (3,1) (5,2) (5,5) (1,3) (3,0) (5,1) (0,2) (0,4) (1,1) (4,0) (3,1) (1,3) (5,5)
+  nodes (5,5) (5,2) (1,3) (3,1) (5,2) (5,5) (1,3) (3,0) (5,1) (0,2) (0,4) (1,1) (4,0) (3,1) (1,3) (5,5) (5,4) (4,1) (0,3)
+  parents [Some(5), Some(4), Some(6), Some(13), Some(16), Some(15), Some(14), Some(3), Some(1), Some(18), Some(16), Some(3), Some(17), Some(17), Some(18), None, Some(0), Some(8), Some(10)]
+  length 18 valid true
+case 60 driver 1 alpha 0.3
+  points (0,1) (2,2)
+  nodes (0,1) (2,2)
+  parents [Some(1), None]
+  length 3 valid true
+case 61 driver 2 alpha 0
+  points (5,1) (1,7) (7,1)
+  nodes (5,1) (1,7) (7,1)
+  parents [Some(2), Some(0), None]
+  length 12 valid true
+case 62 driver 2 alpha 1
+  points (23,2) (19,10) (16,27) (2,25)
+  nodes (23,2) (19,10) (16,27) (2,25) (16,25)
+  parents [Some(1), Some(4), None, Some(4), Some(2)]
+  length 46 valid true
+case 63 driver 3 alpha 0.6
+  points (104,168) (182,66) (143,29) (55,26) (139,74)
+  nodes (104,168) (182,66) (143,29) (55,26) (139,74) (104,29) (143,66)
+  parents [Some(5), Some(6), Some(5), None, Some(6), Some(3), Some(2)]
+  length 318 valid true
+case 64 driver 4 alpha 0.3
+  points (3,2) (5,3) (1,0) (4,1) (4,5) (5,1)
+  nodes (3,2) (5,3) (1,0) (4,1) (4,5) (5,1) (3,1)
+  parents [Some(6), Some(4), Some(6), Some(5), None, Some(1), Some(3)]
+  length 11 valid true
+case 65 driver 6 alpha 0
+  points (2,1) (3,3) (2,1) (3,1) (1,0) (0,3) (3,1)
+  nodes (2,1) (3,3) (2,1) (3,1) (1,0) (0,3) (3,1)
+  parents [Some(2), Some(6), Some(3), Some(6), Some(0), Some(1), None]
+  length 8 valid true
+case 66 driver 3 alpha 1
+  points (5,3) (2,7) (6,3) (0,2) (6,1) (1,1) (3,1) (2,2)
+  nodes (5,3) (2,7) (6,3) (0,2) (6,1) (1,1) (3,1) (2,2) (3,2) (1,2)
+  parents [Some(8), Some(7), Some(0), None, Some(6), Some(9), Some(8), Some(9), Some(7), Some(3)]
+  length 17 valid true
+case 67 driver 5 alpha 0.6
+  points (6,18) (6,17) (12,16) (13,25) (14,28) (17,28) (19,13) (12,23) (13,8)
+  nodes (6,18) (6,17) (12,16) (13,25) (14,28) (17,28) (19,13) (12,23) (13,8) (12,18)
+  parents [Some(9), Some(0), Some(9), Some(4), Some(5), None, Some(5), Some(3), Some(2), Some(7)]
+  length 50 valid true
+case 68 driver 2 alpha 0.3
+  points (52,164) (122,157) (79,152) (27,94) (36,46) (98,8) (75,183) (162,19) (90,7) (29,88)
+  nodes (52,164) (122,157) (79,152) (27,94) (36,46) (98,8) (75,183) (162,19) (90,7) (29,88) (75,164) (79,157) (29,94) (90,8)
+  parents [Some(10), Some(11), None, Some(12), Some(9), Some(13), Some(10), Some(5), Some(13), Some(12), Some(11), Some(2), Some(0), Some(4)]
+  length 427 valid true
+case 69 driver 10 alpha 0
+  points (2,0) (5,5) (5,4) (3,1) (4,0) (2,2) (3,5) (0,0) (1,2) (4,5) (4,3)
+  nodes (2,0) (5,5) (5,4) (3,1) (4,0) (2,2) (3,5) (0,0) (1,2) (4,5) (4,3) (3,0)
+  parents [Some(11), Some(2), Some(10), Some(10), Some(11), Some(0), Some(9), Some(0), Some(5), Some(1), None, Some(3)]
+  length 16 valid true
+case 70 driver 8 alpha 1
+  points (1,3) (2,0) (0,3) (0,1) (1,2) (1,1) (1,3) (3,2) (1,3) (1,3) (1,3) (0,0)
+  nodes (1,3) (2,0) (0,3) (0,1) (1,2) (1,1) (1,3) (3,2) (1,3) (1,3) (1,3) (0,0)
+  parents [Some(6), Some(5), Some(10), Some(5), Some(0), Some(4), Some(8), Some(4), None, Some(8), Some(9), Some(3)]
+  length 9 valid true
+case 71 driver 9 alpha 0.6
+  points (0,2) (0,1) (6,1) (1,2) (6,2) (1,2) (1,0) (1,1) (4,2) (5,7) (6,3) (0,5) (3,3)
+  nodes (0,2) (0,1) (6,1) (1,2) (6,2) (1,2) (1,0) (1,1) (4,2) (5,7) (6,3) (0,5) (3,3) (5,5) (5,3)
+  parents [Some(11), Some(0), Some(4), Some(0), Some(10), Some(3), Some(7), Some(3), Some(4), None, Some(14), Some(13), Some(14), Some(9), Some(13)]
+  length 23 valid true
+case 72 driver 12 alpha 0.3
+  points (21,23) (24,12) (14,19) (10,8) (22,22) (14,5) (0,12) (25,3) (18,18) (26,9) (14,19) (20,10) (3,17) (8,5)
+  nodes (21,23) (24,12) (14,19) (10,8) (22,22) (14,5) (0,12) (25,3) (18,18) (26,9) (14,19) (20,10) (3,17) (8,5) (10,17) (10,5) (24,10) (20,18) (25,9) (21,22) (14,18)
+  parents [Some(19), Some(16), Some(20), Some(14), Some(19), Some(15), Some(12), Some(18), Some(20), Some(18), Some(2), Some(17), None, Some(15), Some(12), Some(3), Some(11), Some(8), Some(16), Some(17), Some(14)]
+  length 75 valid true
+case 73 driver 12 alpha 0
+  points (40,196) (80,36) (116,174) (36,191) (162,70) (199,178) (1,31) (161,118) (196,67) (164,160) (68,197) (30,170) (34,4) (119,56) (173,143)
+  nodes (40,196) (80,36) (116,174) (36,191) (162,70) (199,178) (1,31) (161,118) (196,67) (164,160) (68,197) (30,170) (34,4) (119,56) (173,143) (34,31) (164,174) (164,143) (162,67) (162,118) (68,196)
+  parents [Some(20), Some(15), Some(16), Some(0), Some(18), Some(16), Some(15), Some(19), Some(18), Some(17), Some(20), Some(3), None, Some(1), Some(17), Some(12), Some(9), Some(19), Some(13), Some(4), Some(2)]
+  length 599 valid true
+case 74 driver 6 alpha 1
+  points (5,2) (1,4) (2,2) (2,1) (3,1) (1,0) (2,1) (0,0) (3,2) (0,3) (0,3) (4,5) (0,1) (1,5) (1,3) (3,3)
+  nodes (5,2) (1,4) (2,2) (2,1) (3,1) (1,0) (2,1) (0,0) (3,2) (0,3) (0,3) (4,5) (0,1) (1,5) (1,3) (3,3) (1,1)
+  parents [Some(8), Some(14), Some(6), Some(6), Some(6), Some(16), None, Some(12), Some(4), Some(12), Some(9), Some(15), Some(16), Some(1), Some(2), Some(8), Some(3)]
+  length 19 valid true
+case 75 driver 1 alpha 0.6
+  points (1,2) (0,0)
+  nodes (1,2) (0,0)
+  parents [Some(1), None]
+  length 3 valid true
+case 76 driver 2 alpha 0.3
+  points (4,3) (3,3) (0,1)
+  nodes (4,3) (3,3) (0,1)
+  parents [Some(1), Some(2), None]
+  length 6 valid true
+case 77 driver 1 alpha 0
+  points (3,26) (29,23) (14,7) (2,8)
+  nodes (3,26) (29,23) (14,7) (2,8) (3,23) (3,8)
+  parents [Some(4), None, Some(5), Some(5), Some(1), Some(4)]
+  length 57 valid true
+case 78 driver 4 alpha 1
+  points (119,112) (10,43) (184,120) (101,44) (76,184)
+  nodes (119,112) (10,43) (184,120) (101,44) (76,184) (76,44) (119,120) (76,120)
+  parents [Some(6), Some(5), Some(6), Some(5), None, Some(7), Some(7), Some(4)]
+  length 348 valid true
+case 79 driver 5 alpha 0.6
+  points (0,5) (4,4) (4,3) (5,1) (0,4) (3,3)
+  nodes (0,5) (4,4) (4,3) (5,1) (0,4) (3,3)
+  parents [Some(4), Some(2), Some(5), Some(2), Some(5), None]
+  length 10 valid true
+case 80 driver 0 alpha 0.3
+  points (0,1) (0,3) (3,3) (1,3) (2,1) (0,0) (0,2)
+  nodes (0,1) (0,3) (3,3) (1,3) (2,1) (0,0) (0,2)
+  parents [None, Some(6), Some(3), Some(1), Some(0), Some(0), Some(0)]
+  length 8 valid true
+case 81 driver 0 alpha 0
+  points (6,4) (7,0) (6,7) (0,3) (4,2) (5,7) (6,3) (5,2)
+  nodes (6,4) (7,0) (6,7) (0,3) (4,2) (5,7) (6,3) (5,2) (6,2)
+  parents [None, Some(8), Some(0), Some(4), Some(7), Some(2), Some(0), Some(8), Some(6)]
+  length 16 valid true
+case 82 driver 8 alpha 1
+  points (16,17) (15,6) (7,0) (15,11) (11,15) (24,16) (6,7) (8,4) (13,7)
+  nodes (16,17) (15,6) (7,0) (15,11) (11,15) (24,16) (6,7) (8,4) (13,7) (16,16) (8,7) (13,11)
+  parents [Some(9), Some(8), Some(7), Some(11), Some(11), Some(9), Some(10), Some(10), None, Some(3), Some(8), Some(8)]
+  length 45 valid true
+case 83 driver 5 alpha 0.6
+  points (191,173) (113,91) (158,115) (132,21) (32,117) (108,114) (182,193) (110,84) (171,82) (118,35)
+  nodes (191,173) (113,91) (158,115) (132,21) (32,117) (108,114) (182,193) (110,84) (171,82) (118,35) (171,115) (182,173) (113,84) (113,114)
+  parents [Some(11), Some(13), Some(13), Some(9), Some(5), None, Some(11), Some(12), Some(10), Some(12), Some(2), Some(10), Some(1), Some(5)]
+  length 389 valid true
+case 84 driver 3 alpha 0.3
+  points (5,3) (4,2) (2,0) (4,3) (1,3) (3,1) (5,3) (5,1) (0,0) (2,0) (1,1)
+  nodes (5,3) (4,2) (2,0) (4,3) (1,3) (3,1) (5,3) (5,1) (0,0) (2,0) (1,1) (4,1) (2,1)
+  parents [Some(3), Some(3), Some(9), None, Some(3), Some(11), Some(0), Some(11), Some(10), Some(12), Some(12), Some(1), Some(5)]
+  length 13 valid true
+case 85 driver 9 alpha 0
+  points (0,3) (1,2) (0,2) (2,1) (2,1) (1,1) (2,0) (1,2) (1,2) (1,1) (0,1) (2,0)
+  nodes (0,3) (1,2) (0,2) (2,1) (2,1) (1,1) (2,0) (1,2) (1,2) (1,1) (0,1) (2,0)
+  parents [Some(2), Some(9), Some(8), Some(9), Some(3), Some(9), Some(11), Some(1), Some(7), None, Some(5), Some(3)]
+  length 6 valid true
+case 86 driver 7 alpha 1
+  points (5,5) (4,4) (7,3) (7,2) (7,6) (6,1) (0,2) (4,0) (7,5) (6,3) (5,2) (7,0) (4,7)
+  nodes (5,5) (4,4) (7,3) (7,2) (7,6) (6,1) (0,2) (4,0) (7,5) (6,3) (5,2) (7,0) (4,7) (5,1) (4,2) (5,0) (4,5)
+  parents [Some(16), Some(14), Some(3), Some(11), Some(8), Some(13), Some(14), None, Some(2), Some(10), Some(13), Some(15), Some(16), Some(15), Some(7), Some(7), Some(1)]
+  length 26 valid true
+case 87 driver 6 alpha 0.6
+  points (26,23) (9,7) (12,16) (23,28) (15,11) (10,24) (9,25) (12,13) (10,19) (0,28) (2,27) (14,27) (24,19) (29,24)
+  nodes (26,23) (9,7) (12,16) (23,28) (15,11) (10,24) (9,25) (12,13) (10,19) (0,28) (2,27) (14,27) (24,19) (29,24) (10,16) (9,27) (26,24) (23,27)
+  parents [Some(16), Some(14), Some(14), Some(17), Some(7), Some(6), None, Some(2), Some(5), Some(10), Some(15), Some(15), Some(8), Some(16), Some(8), Some(6), Some(17), Some(11)]
+  length 81 valid true
+case 88 driver 1 alpha 0.3
+  points (96,158) (178,85) (62,42) (3,90) (75,109) (199,15) (146,114) (131,4) (7,75) (96,145) (139,108) (11,80) (13,102) (122,145) (65,9)
+  nodes (96,158) (178,85) (62,42) (3,90) (75,109) (199,15) (146,114) (131,4) (7,75) (96,145) (139,108) (11,80) (13,102) (122,145) (65,9) (178,15) (62,102) (11,90) (139,114) (139,109)
+  parents [Some(9), None, Some(16), Some(17), Some(19), Some(15), Some(1), Some(15), Some(11), Some(13), Some(19), Some(17), Some(16), Some(18), Some(2), Some(1), Some(4), Some(12), Some(6), Some(18)]
+  length 580 valid true
+case 89 driver 9 alpha 0
+  points (4,0) (3,0) (4,0) (5,5) (1,3) (2,2) (4,4) (0,2) (0,1) (0,5) (2,2) (1,0) (5,2) (3,5) (4,3) (2,2)
+  nodes (4,0) (3,0) (4,0) (5,5) (1,3) (2,2) (4,4) (0,2) (0,1) (0,5) (2,2) (1,0) (5,2) (3,5) (4,3) (2,2) (4,5) (4,2) (0,3)
+  parents [Some(1), Some(11), Some(0), Some(16), Some(18), Some(10), Some(14), Some(18), Some(7), None, Some(15), Some(8), Some(17), Some(16), Some(17), Some(4), Some(6), Some(2), Some(9)]
+  length 20 valid true
+case 90 driver 1 alpha 1
+  points (2,0) (0,2)
+  nodes (2,0) (0,2)
+  parents [Some(1), None]
+  length 4 valid true
+case 91 driver 0 alpha 0.6
+  points (0,7) (0,6) (3,7)
+  nodes (0,7) (0,6) (3,7)
+  parents [None, Some(0), Some(0)]
+  length 4 valid true
+case 92 driver 3 alpha 0.3
+  points (4,18) (14,2) (0,26) (6,19)
+  nodes (4,18) (14,2) (0,26) (6,19) (6,18)
+  parents [Some(4), Some(4), Some(0), None, Some(3)]
+  length 39 valid true
+case 93 driver 1 alpha 0
+  points (152,197) (172,101) (178,18) (0,80) (193,118)
+  nodes (152,197) (172,101) (178,18) (0,80) (193,118) (172,80) (172,118)
+  parents [Some(6), None, Some(5), Some(5), Some(6), Some(1), Some(1)]
+  length 398 valid true
+case 94 driver 2 alpha 1
+  points (2,4) (4,1) (5,4) (1,3) (5,5) (1,2)
+  nodes (2,4) (4,1) (5,4) (1,3) (5,5) (1,2) (4,4)
+  parents [Some(6), Some(6), None, Some(0), Some(2), Some(3), Some(2)]
+  length 10 valid true
+case 95 driver 6 alpha 0.6
+  points (1,2) (3,1) (3,1) (3,3) (1,2) (2,0) (3,2)
+  nodes (1,2) (3,1) (3,1) (3,3) (1,2) (2,0) (3,2)
+  parents [Some(4), Some(2), Some(6), Some(6), Some(6), Some(1), None]
+  length 6 valid true
+case 96 driver 2 alpha 0.3
+  points (0,1) (4,3) (1,7) (0,2) (0,7) (1,6) (6,7) (2,2)
+  nodes (0,1) (4,3) (1,7) (0,2) (0,7) (1,6) (6,7) (2,2) (1,2)
+  parents [Some(3), Some(7), None, Some(8), Some(2), Some(2), Some(2), Some(8), Some(5)]
+  length 17 valid true
+case 97 driver 2 alpha 0
+  points (3,10) (16,0) (29,18) (9,2) (5,23) (8,29) (10,10) (28,14) (2,8)
+  nodes (3,10) (16,0) (29,18) (9,2) (5,23) (8,29) (10,10) (28,14) (2,8) (5,10) (10,2)
+  parents [Some(9), Some(10), None, Some(10), Some(9), Some(4), Some(7), Some(2), Some(0), Some(6), Some(6)]
+  length 76 valid true
+case 98 driver 3 alpha 1
+  points (99,43) (73,154) (194,15) (31,148) (83,107) (186,191) (193,173) (136,185) (164,29) (55,44)
+  nodes (99,43) (73,154) (194,15) (31,148) (83,107) (186,191) (193,173) (136,185) (164,29) (55,44) (136,173) (55,107) (55,148)
+  parents [Some(9), Some(12), Some(8), None, Some(11), Some(7), Some(10), Some(10), Some(0), Some(11), Some(1), Some(12), Some(3)]
+  length 555 valid true
+case 99 driver 10 alpha 0.6
+  points (5,5) (2,4) (3,5) (0,1) (1,0) (5,1) (4,2) (0,1) (2,3) (3,2) (5,1)
+  nodes (5,5) (2,4) (3,5) (0,1) (1,0) (5,1) (4,2) (0,1) (2,3) (3,2) (5,1) (4,1) (1,1)
+  parents [Some(10), Some(8), Some(0), Some(12), Some(12), Some(10), Some(11), Some(3), Some(9), Some(6), None, Some(5), Some(11)]
+  length 17 valid true
+case 100 driver 0 alpha 0.3
+  points (0,1) (3,3) (3,3) (2,0) (2,1) (3,2) (2,3) (2,3) (2,2) (2,1) (0,1) (1,1)
+  nodes (0,1) (3,3) (3,3) (2,0) (2,1) (3,2) (2,3) (2,3) (2,2) (2,1) (0,1) (1,1)
+  parents [None, Some(7), Some(1), Some(4), Some(11), Some(8), Some(8), Some(6), Some(9), Some(4), Some(0), Some(10)]
+  length 7 valid true
+case 101 driver 2 alpha 0
+  points (3,0) (0,3) (6,4) (6,2) (7,4) (6,0) (2,1) (2,0) (1,5) (7,4) (4,4) (4,1) (2,3)
+  nodes (3,0) (0,3) (6,4) (6,2) (7,4) (6,0) (2,1) (2,0) (1,5) (7,4) (4,4) (4,1) (2,3) (1,3)
+  parents [Some(5), Some(13), None, Some(2), Some(2), Some(3), Some(7), Some(0), Some(13), Some(4), Some(2), Some(6), Some(6), Some(12)]
+  length 20 valid true
+case 102 driver 2 alpha 1
+  points (5,3) (7,11) (8,22) (7,7) (11,28) (21,29) (0,14) (23,0) (23,4) (8,28) (5,0) (16,14) (9,29) (6,4)
+  nodes (5,3) (7,11) (8,22) (7,7) (11,28) (21,29) (0,14) (23,0) (23,4) (8,28) (5,0) (16,14) (9,29) (6,4) (7,14) (8,14) (9,28)
+  parents [Some(13), Some(14), None, Some(1), Some(16), Some(4), Some(14), Some(8), Some(11), Some(2), Some(0), Some(15), Some(16), Some(3), Some(15), Some(2), Some(9)]
+  length 82 valid true
+case 103 driver 14 alpha 0.6
+  points (175,77) (67,116) (196,136) (52,17) (37,152) (36,164) (66,184) (198,3) (98,121) (62,47) (185,6) (185,193) (35,113) (76,51) (176,62)
+  nodes (175,77) (67,116) (196,136) (52,17) (37,152) (36,164) (66,184) (198,3) (98,121) (62,47) (185,6) (185,193) (35,113) (76,51) (176,62) (175,121) (185,136) (176,51) (67,121) (37,116)
+  parents [Some(14), Some(18), Some(16), Some(9), Some(19), Some(4), Some(18), Some(10), Some(15), Some(13), Some(17), Some(16), Some(19), Some(17), None, Some(0), Some(15), Some(14), Some(8), Some(1)]
+  length 653 valid true
+case 104 driver 3 alpha 0.3
+  points (4,0) (2,3) (0,2) (2,5) (3,5) (5,5) (5,3) (3,2) (4,1) (5,0) (4,1) (2,3) (3,1) (1,0) (2,5) (2,2)
+  nodes (4,0) (2,3) (0,2) (2,5) (3,5) (5,5) (5,3) (3,2) (4,1) (5,0) (4,1) (2,3) (3,1) (1,0) (2,5) (2,2) (1,2)
+  parents [Some(8), Some(11), Some(16), None, Some(14), Some(4), Some(5), Some(15), Some(12), Some(0), Some(8), Some(3), Some(7), Some(16), Some(3), Some(1), Some(15)]
+  length 17 valid true
+case 105 driver 0 alpha 0
+  points (2,3) (3,1)
+  nodes (2,3) (3,1)
+  parents [None, Some(0)]
+  length 3 valid true
+case 106 driver 0 alpha 1
+  points (1,7) (1,6) (5,7)
+  nodes (1,7) (1,6) (5,7)
+  parents [None, Some(0), Some(0)]
+  length 5 valid true
+case 107 driver 3 alpha 0.6
+  points (16,18) (18,28) (21,5) (3,14)
+  nodes (16,18) (18,28) (21,5) (3,14) (16,14)
+  parents [Some(4), Some(0), Some(4), None, Some(3)]
+  length 43 valid true
+case 108 driver 1 alpha 0.3
+  points (189,132) (76,85) (32,18) (116,90) (169,88)
+  nodes (189,132) (76,85) (32,18) (116,90) (169,88) (169,90)
+  parents [Some(5), None, Some(1), Some(1), Some(5), Some(3)]
+  length 273 valid true
+case 109 driver 1 alpha 0
+  points (1,4) (2,5) (1,1) (3,2) (3,0) (5,4)
+  nodes (1,4) (2,5) (1,1) (3,2) (3,0) (5,4) (3,1)
+  parents [Some(1), None, Some(0), Some(6), Some(6), Some(3), Some(2)]
+  length 13 valid true
+case 110 driver 2 alpha 1
+  points (0,2) (1,1) (0,1) (3,0) (0,2) (0,1) (1,1)
+  nodes (0,2) (1,1) (0,1) (3,0) (0,2) (0,1) (1,1)
+  parents [Some(5), Some(5), None, Some(1), Some(0), Some(2), Some(1)]
+  length 5 valid true
+case 111 driver 1 alpha 0.6
+  points (3,5) (6,4) (3,1) (5,7) (1,4) (4,0) (3,4) (4,4)
+  nodes (3,5) (6,4) (3,1) (5,7) (1,4) (4,0) (3,4) (4,4) (5,4) (3,4)
+  parents [Some(6), None, Some(9), Some(8), Some(9), Some(7), Some(7), Some(8), Some(1), Some(6)]
+  length 16 valid true
+case 112 driver 7 alpha 0.3
+  points (15,10) (27,15) (27,14) (2,12) (17,23) (20,12) (6,23) (29,16) (23,0)
+  nodes (15,10) (27,15) (27,14) (2,12) (17,23) (20,12) (6,23) (29,16) (23,0) (23,12) (17,12) (15,12)
+  parents [Some(11), Some(7), Some(1), Some(11), Some(10), Some(9), Some(4), None, Some(9), Some(2), Some(5), Some(10)]
+  length 67 valid true
+case 113 driver 9 alpha 0
+  points (8,75) (69,6) (0,93) (136,52) (146,108) (193,132) (175,109) (191,132) (63,39) (151,24)
+  nodes (8,75) (69,6) (0,93) (136,52) (146,108) (193,132) (175,109) (191,132) (63,39) (151,24) (136,39) (69,39)
+  parents [Some(8), Some(11), Some(0), Some(10), Some(3), Some(7), Some(4), Some(6), Some(11), None, Some(9), Some(10)]
+  length 403 valid true
+case 114 driver 9 alpha 1
+  points (2,0) (0,5) (0,2) (0,1) (2,0) (1,2) (4,3) (5,4) (2,0) (3,2) (0,5)
+  nodes (2,0) (0,5) (0,2) (0,1) (2,0) (1,2) (4,3) (5,4) (2,0) (3,2) (0,5) (2,2)
+  parents [Some(4), Some(2), Some(5), Some(2), Some(8), Some(11), Some(9), Some(6), Some(11), None, Some(1), Some(9)]
+  length 13 valid true
+case 115 driver 9 alpha 0.6
+  points (1,0) (1,0) (3,1) (0,3) (0,2) (1,3) (0,3) (1,2) (1,2) (1,2) (0,3) (1,0)
+  nodes (1,0) (1,0) (3,1) (0,3) (0,2) (1,3) (0,3) (1,2) (1,2) (1,2) (0,3) (1,0) (1,1)
+  parents [Some(1), Some(11), Some(12), Some(4), Some(7), Some(9), Some(3), Some(8), Some(9), None, Some(6), Some(12), Some(7)]
+  length 7 valid true
+case 116 driver 0 alpha 0.3
+  points (6,2) (5,4) (2,4) (4,4) (7,4) (7,2) (1,5) (4,0) (5,0) (6,7) (3,3) (1,1) (5,6)
+  nodes (6,2) (5,4) (2,4) (4,4) (7,4) (7,2) (1,5) (4,0) (5,0) (6,7) (3,3) (1,1) (5,6) (3,4)
+  parents [None, Some(4), Some(13), Some(1), Some(5), Some(0), Some(2), Some(8), Some(0), Some(12), Some(13), Some(7), Some(1), Some(3)]
+  length 23 valid true
+case 117 driver 3 alpha 0
+  points (27,18) (25,8) (2,11) (12,7) (28,21) (15,28) (13,16) (6,26) (27,25) (0,21) (16,7) (18,4) (26,20) (3,23)
+  nodes (27,18) (25,8) (2,11) (12,7) (28,21) (15,28) (13,16) (6,26) (27,25) (0,21) (16,7) (18,4) (26,20) (3,23) (12,11) (18,7) (2,21) (27,21) (27,20)
+  parents [Some(1), Some(15), Some(14), None, Some(17), Some(7), Some(14), Some(13), Some(17), Some(16), Some(3), Some(15), Some(18), Some(16), Some(3), Some(10), Some(2), Some(18), Some(0)]
+  length 90 valid true
+case 118 driver 4 alpha 1
+  points (133,168) (66,158) (118,66) (176,28) (33,159) (9,72) (108,28) (72,68) (167,44) (189,82) (32,135) (159,194) (49,139) (70,125) (54,22)
+  nodes (133,168) (66,158) (118,66) (176,28) (33,159) (9,72) (108,28) (72,68) (167,44) (189,82) (32,135) (159,194) (49,139) (70,125) (54,22) (72,82) (108,66) (66,159) (33,139) (54,125)
+  parents [Some(17), Some(17), Some(16), Some(8), None, Some(10), Some(16), Some(15), Some(2), Some(15), Some(18), Some(0), Some(18), Some(19), Some(19), Some(13), Some(7), Some(4), Some(4), Some(12)]
+  length 785 valid true
+case 119 driver 2 alpha 0.6
+  points (0,4) (4,3) (5,3) (2,2) (3,0) (4,2) (3,3) (4,1) (0,3) (5,2) (2,2) (2,1) (1,2) (0,5) (2,4) (4,1)
+  nodes (0,4) (4,3) (5,3) (2,2) (3,0) (4,2) (3,3) (4,1) (0,3) (5,2) (2,2) (2,1) (1,2) (0,5) (2,4) (4,1) (2,3)
+  parents [Some(8), Some(2), None, Some(10), Some(7), Some(9), Some(1), Some(15), Some(16), Some(2), Some(5), Some(3), Some(3), Some(0), Some(16), Some(5), Some(6)]
+  length 17 valid true
+case 120 driver 0 alpha 0.3
+  points (2,0) (2,0)
+  nodes (2,0) (2,0)
+  parents [None, Some(0)]
+  length 0 valid true
+case 121 driver 2 alpha 0
+  points (4,1) (5,7) (4,6)
+  nodes (4,1) (5,7) (4,6)
+  parents [Some(2), Some(2), None]
+  length 7 valid true
+case 122 driver 3 alpha 1
+  points (14,27) (11,4) (22,29) (23,3)
+  nodes (14,27) (11,4) (22,29) (23,3) (22,27) (22,4)
+  parents [Some(4), Some(5), Some(4), None, Some(5), Some(3)]
+  length 46 valid true
+case 123 driver 1 alpha 0.6
+  points (105,172) (152,79) (139,97) (19,196) (17,23)
+  nodes (105,172) (152,79) (139,97) (19,196) (17,23) (139,79)
+  parents [Some(2), None, Some(5), Some(0), Some(5), Some(1)]
+  length 428 valid true
+case 124 driver 3 alpha 0.3
+  points (3,5) (3,0) (4,1) (4,5) (0,3) (0,4)
+  nodes (3,5) (3,0) (4,1) (4,5) (0,3) (0,4)
+  parents [Some(3), Some(2), Some(3), None, Some(5), Some(0)]
+  length 12 valid true
+case 125 driver 2 alpha 0
+  points (2,0) (3,2) (0,3) (1,0) (0,1) (2,2) (3,1)
+  nodes (2,0) (3,2) (0,3) (1,0) (0,1) (2,2) (3,1)
+  parents [Some(3), Some(5), None, Some(4), Some(2), Some(0), Some(1)]
+  length 9 valid true
+case 126 driver 5 alpha 1
+  points (6,0) (0,3) (5,4) (3,2) (2,3) (2,5) (3,1) (4,1)
+  nodes (6,0) (0,3) (5,4) (3,2) (2,3) (2,5) (3,1) (4,1) (2,4)
+  parents [Some(7), Some(4), Some(8), Some(4), Some(8), None, Some(3), Some(6), Some(5)]
+  length 14 valid true
+case 127 driver 0 alpha 0.6
+  points (9,12) (28,20) (25,20) (15,20) (26,3) (22,2) (10,12) (7,25) (12,24)
+  nodes (9,12) (28,20) (25,20) (15,20) (26,3) (22,2) (10,12) (7,25) (12,24) (12,20) (12,12) (22,3)
+  parents [None, Some(2), Some(3), Some(9), Some(11), Some(11), Some(0), Some(8), Some(9), Some(10), Some(6), Some(10)]
+  length 61 valid true
+case 128 driver 0 alpha 0.3
+  points (190,22) (198,43) (25,38) (7,59) (79,114) (74,137) (88,37) (175,158) (136,156) (104,113)
+  nodes (190,22) (198,43) (25,38) (7,59) (79,114) (74,137) (88,37) (175,158) (136,156) (104,113) (190,37) (88,113) (88,38)
+  parents [None, Some(10), Some(12), Some(2), Some(11), Some(4), Some(10), Some(8), Some(9), Some(11), Some(0), Some(12), Some(6)]
+  length 479 valid true
+case 129 driver 6 alpha 0
+  points (5,3) (5,2) (1,5) (5,4) (5,5) (2,0) (4,4) (4,3) (2,2) (3,5) (2,1)
+  nodes (5,3) (5,2) (1,5) (5,4) (5,5) (2,0) (4,4) (4,3) (2,2) (3,5) (2,1)
+  parents [Some(3), Some(0), Some(9), Some(6), Some(3), Some(10), None, Some(0), Some(7), Some(4), Some(8)]
+  length 14 valid true
+case 130 driver 7 alpha 1
+  points (0,2) (3,2) (3,0) (3,0) (2,0) (1,2) (3,3) (0,3) (3,0) (0,3) (1,1) (2,3)
+  nodes (0,2) (3,2) (3,0) (3,0) (2,0) (1,2) (3,3) (0,3) (3,0) (0,3) (1,1) (2,3)
+  parents [Some(7), Some(6), Some(4), Some(2), Some(10), Some(0), Some(11), None, Some(1), Some(7), Some(5), Some(9)]
+  length 12 valid true
+case 131 driver 0 alpha 0.6
+  points (7,2) (2,1) (7,3) (3,0) (4,6) (2,6) (3,7) (1,2) (6,2) (3,5) (6,2) (6,7) (7,5)
+  nodes (7,2) (2,1) (7,3) (3,0) (4,6) (2,6) (3,7) (1,2) (6,2) (3,5) (6,2) (6,7) (7,5) (4,5) (6,5) (3,6) (3,1)
+  parents [None, Some(16), Some(0), Some(16), Some(13), Some(15), Some(15), Some(1), Some(10), Some(13), Some(0), Some(14), Some(2), Some(14), Some(12), Some(9), Some(8)]
+  length 22 valid true
+case 132 driver 2 alpha 0.3
+  points (15,20) (24,11) (10,16) (21,8) (11,21) (20,17) (15,21) (19,25) (13,21) (10,22) (26,1) (26,9) (5,26) (13,27)
+  nodes (15,20) (24,11) (10,16) (21,8) (11,21) (20,17) (15,21) (19,25) (13,21) (10,22) (26,1) (26,9) (5,26) (13,27) (21,11) (11,17)
+  parents [Some(6), Some(14), None, Some(14), Some(15), Some(15), Some(8), Some(6), Some(4), Some(4), Some(11), Some(1), Some(9), Some(8), Some(5), Some(2)]
+  length 70 valid true
+case 133 driver 3 alpha 0
+  points (114,160) (123,45) (167,101) (92,4) (62,14) (169,33) (70,27) (77,141) (57,62) (157,155) (55,163) (69,76) (127,188) (97,23) (168,117)
+  nodes (114,160) (123,45) (167,101) (92,4) (62,14) (169,33) (70,27) (77,141) (57,62) (157,155) (55,163) (69,76) (127,188) (97,23) (168,117) (77,160) (167,45) (127,160) (69,62) (92,23) (70,23) (167,117)
+  parents [Some(17), Some(13), Some(16), None, Some(20), Some(16), Some(20), Some(15), Some(18), Some(21), Some(15), Some(18), Some(17), Some(19), Some(21), Some(0), Some(1), Some(9), Some(6), Some(3), Some(19), Some(2)]
+  length 513 valid true
+case 134 driver 10 alpha 1
+  points (0,3) (3,1) (5,5) (3,4) (0,2) (1,2) (0,4) (0,5) (4,5) (0,4) (0,2) (4,1) (1,1) (3,4) (2,3) (0,3)
+  nodes (0,3) (3,1) (5,5) (3,4) (0,2) (1,2) (0,4) (0,5) (4,5) (0,4) (0,2) (4,1) (1,1) (3,4) (2,3) (0,3)
+  parents [Some(10), Some(12), Some(8), Some(14), Some(10), Some(10), Some(15), Some(9), Some(13), Some(6), None, Some(1), Some(5), Some(3), Some(5), Some(0)]
+  length 15 valid true
+case 135 driver 0 alpha 0.6
+  points (3,0) (0,1)
+  nodes (3,0) (0,1)
+  parents [None, Some(0)]
+  length 4 valid true
+case 136 driver 1 alpha 0.3
+  points (4,2) (7,0) (6,5)
+  nodes (4,2) (7,0) (6,5) (6,2)
+  parents [Some(3), None, Some(3), Some(1)]
+  length 8 valid true
+case 137 driver 3 alpha 0
+  points (10,10) (21,2) (2,16) (26,2)
+  nodes (10,10) (21,2) (2,16) (26,2)
+  parents [Some(1), Some(3), Some(0), None]
+  length 38 valid true
+case 138 driver 4 alpha 1
+  points (177,77) (132,121) (27,98) (37,32) (112,102)
+  nodes (177,77) (132,121) (27,98) (37,32) (112,102) (37,98) (132,102)
+  parents [Some(6), Some(6), Some(5), Some(5), None, Some(4), Some(4)]
+  length 264 valid true
+case 139 driver 3 alpha 0.6
+  points (5,1) (3,0) (0,3) (1,4) (4,3) (5,3)
+  nodes (5,1) (3,0) (0,3) (1,4) (4,3) (5,3) (3,3) (1,3)
+  parents [Some(5), Some(6), Some(7), None, Some(6), Some(4), Some(7), Some(3)]
+  length 11 valid true
+case 140 driver 4 alpha 0.3
+  points (1,0) (2,3) (0,1) (1,3) (3,1) (1,1) (1,2)
+  nodes (1,0) (2,3) (0,1) (1,3) (3,1) (1,1) (1,2) (1,1)
+  parents [Some(5), Some(3), Some(7), Some(6), None, Some(4), Some(7), Some(5)]
+  length 7 valid true
+case 141 driver 4 alpha 0
+  points (3,4) (2,3) (5,6) (3,2) (4,5) (2,6) (5,0) (3,6)
+  nodes (3,4) (2,3) (5,6) (3,2) (4,5) (2,6) (5,0) (3,6) (3,5) (3,3)
+  parents [Some(8), Some(9), Some(7), Some(9), None, Some(7), Some(3), Some(8), Some(4), Some(0)]
+  length 13 valid true
+case 142 driver 4 alpha 1
+  points (2,6) (28,2) (18,28) (21,4) (7,8) (29,4) (13,14) (29,17) (0,27)
+  nodes (2,6) (28,2) (18,28) (21,4) (7,8) (29,4) (13,14) (29,17) (0,27) (18,17) (28,4) (13,8) (2,8)
+  parents [Some(12), Some(10), Some(9), Some(11), None, Some(10), Some(11), Some(9), Some(12), Some(6), Some(3), Some(4), Some(4)]
+  length 92 valid true
+case 143 driver 2 alpha 0.6
+  points (168,176) (157,96) (47,69) (152,83) (36,148) (73,108) (129,138) (197,87) (15,183) (95,38)
+  nodes (168,176) (157,96) (47,69) (152,83) (36,148) (73,108) (129,138) (197,87) (15,183) (95,38) (95,69) (47,108) (157,87)
+  parents [Some(6), Some(12), None, Some(10), Some(11), Some(11), Some(5), Some(12), Some(4), Some(10), Some(2), Some(2), Some(3)]
+  length 543 valid true
+case 144 driver 2 alpha 0.3
+  points (2,3) (5,0) (5,4) (2,2) (5,3) (4,4) (2,5) (0,5) (4,0) (2,1) (0,2)
+  nodes (2,3) (5,0) (5,4) (2,2) (5,3) (4,4) (2,5) (0,5) (4,0) (2,1) (0,2) (2,4)
+  parents [Some(11), Some(4), None, Some(0), Some(2), Some(2), Some(11), Some(6), Some(1), Some(3), Some(3), Some(5)]
+  length 16 valid true
+case 145 driver 4 alpha 0
+  points (3,2) (2,1) (3,0) (2,3) (0,2) (0,3) (2,2) (1,2) (1,1) (3,1) (2,3) (1,1)
+  nodes (3,2) (2,1) (3,0) (2,3) (0,2) (0,3) (2,2) (1,2) (1,1) (3,1) (2,3) (1,1)
+  parents [Some(6), Some(11), Some(9), Some(6), None, Some(4), Some(7), Some(4), Some(11), Some(0), Some(3), Some(7)]
+  length 9 valid true
+case 146 driver 12 alpha 1
+  points (0,1) (4,0) (5,6) (7,0) (1,7) (2,2) (4,3) (6,5) (4,2) (4,5) (1,1) (2,7) (2,1)
+  nodes (0,1) (4,0) (5,6) (7,0) (1,7) (2,2) (4,3) (6,5) (4,2) (4,5) (1,1) (2,7) (2,1) (5,5)
+  parents [Some(10), Some(12), Some(13), Some(1), Some(11), Some(12), Some(8), Some(13), Some(5), Some(6), Some(12), Some(5), None, Some(9)]
+  length 23 valid true
+case 147 driver 7 alpha 0.6
+  points (6,14) (3,23) (12,25) (0,21) (9,21) (17,29) (12,0) (18,9) (8,22) (16,21) (5,14) (0,8) (16,3) (2,28)
+  nodes (6,14) (3,23) (12,25) (0,21) (9,21) (17,29) (12,0) (18,9) (8,22) (16,21) (5,14) (0,8) (16,3) (2,28) (6,9) (12,21) (16,9) (8,21) (16,9)
+  parents [Some(14), Some(8), Some(15), Some(17), Some(15), Some(9), Some(12), None, Some(17), Some(16), Some(0), Some(14), Some(16), Some(1), Some(18), Some(9), Some(18), Some(4), Some(7)]
+  length 92 valid true
+case 148 driver 11 alpha 0.3
+  points (26,65) (144,161) (105,118) (167,34) (10,89) (156,112) (139,197) (55,94) (28,164) (56,41) (117,18) (38,176) (101,5) (19,76) (65,182)
+  nodes (26,65) (144,161) (105,118) (167,34) (10,89) (156,112) (139,197) (55,94) (28,164) (56,41) (117,18) (38,176) (101,5) (19,76) (65,182) (55,118) (55,176) (139,182) (101,18) (19,89) (55,89)
+  parents [Some(13), Some(17), Some(15), Some(10), Some(19), Some(2), Some(17), Some(15), Some(11), Some(20), Some(18), None, Some(18), Some(19), Some(16), Some(16), Some(11), Some(14), Some(9), Some(20), Some(7)]
+  length 652 valid true
+case 149 driver 7 alpha 0
+  points (2,2) (5,4) (3,3) (4,4) (1,5) (0,0) (3,3) (5,2) (5,5) (4,0) (5,2) (1,4) (3,3) (2,2) (5,1) (4,1)
+  nodes (2,2) (5,4) (3,3) (4,4) (1,5) (0,0) (3,3) (5,2) (5,5) (4,0) (5,2) (1,4) (3,3) (2,2) (5,1) (4,1) (1,2)
+  parents [Some(13), Some(10), Some(6), Some(1), Some(11), Some(16), Some(12), None, Some(1), Some(15), Some(7), Some(16), Some(3), Some(2), Some(7), Some(14), Some(0)]
+  length 18 valid true
+case 150 driver 1 alpha 1
+  points (2,0) (3,1)
+  nodes (2,0) (3,1)
+  parents [Some(1), None]
+  length 2 valid true
+case 151 driver 2 alpha 0.6
+  points (1,4) (3,2) (0,4)
+  nodes (1,4) (3,2) (0,4)
+  parents [Some(2), Some(0), None]
+  length 5 valid true
+case 152 driver 3 alpha 0.3
+  points (29,14) (8,10) (18,25) (25,3)
+  nodes (29,14) (8,10) (18,25) (25,3) (25,10) (25,14)
+  parents [Some(5), Some(4), Some(5), None, Some(3), Some(4)]
+  length 50 valid true
+case 153 driver 0 alpha 0
+  points (41,188) (111,154) (187,136) (123,195) (7,78)
+  nodes (41,188) (111,154) (187,136) (123,195) (7,78) (111,188)
+  parents [None, Some(5), Some(1), Some(5), Some(0), Some(0)]
+  length 361 valid true
+case 154 driver 5 alpha 1
+  points (0,1) (5,2) (5,4) (5,4) (2,5) (0,0)
+  nodes (0,1) (5,2) (5,4) (5,4) (2,5) (0,0) (2,2)
+  parents [Some(5), Some(6), Some(1), Some(2), Some(6), None, Some(0)]
+  length 12 valid true
+case 155 driver 0 alpha 0.6
+  points (2,1) (1,0) (0,3) (1,2) (2,1) (3,1) (0,1)
+  nodes (2,1) (1,0) (0,3) (1,2) (2,1) (3,1) (0,1) (1,1) (1,1)
+  parents [None, Some(7), Some(6), Some(7), Some(0), Some(4), Some(8), Some(8), Some(4)]
+  length 7 valid true
+case 156 driver 3 alpha 0.3
+  points (6,0) (4,2) (3,0) (0,0) (4,1) (4,4) (7,0) (4,6)
+  nodes (6,0) (4,2) (3,0) (0,0) (4,1) (4,4) (7,0) (4,6) (4,0)
+  parents [Some(8), Some(4), Some(3), None, Some(8), Some(1), Some(0), Some(5), Some(2)]
+  length 13 valid true
+case 157 driver 4 alpha 0
+  points (18,26) (26,21) (8,11) (16,12) (25,21) (29,21) (23,9) (4,14) (2,22)
+  nodes (18,26) (26,21) (8,11) (16,12) (25,21) (29,21) (23,9) (4,14) (2,22) (23,12) (23,21) (8,12)
+  parents [Some(10), Some(4), Some(11), Some(9), None, Some(1), Some(9), Some(11), Some(7), Some(10), Some(4), Some(3)]
+  length 60 valid true
+case 158 driver 9 alpha 1
+  points (179,103) (127,114) (52,11) (124,148) (105,73) (134,144) (118,115) (193,55) (133,144) (61,3)
+  nodes (179,103) (127,114) (52,11) (124,148) (105,73) (134,144) (118,115) (193,55) (133,144) (61,3) (105,55) (118,114) (118,103) (61,11)
+  parents [Some(12), Some(11), Some(13), Some(6), Some(10), Some(8), Some(11), Some(10), Some(1), None, Some(13), Some(12), Some(4), Some(9)]
+  length 412 valid true
+case 159 driver 5 alpha 0.6
+  points (1,4) (4,1) (3,5) (5,4) (2,3) (1,5) (3,5) (2,3) (5,3) (5,5) (1,2)
+  nodes (1,4) (4,1) (3,5) (5,4) (2,3) (1,5) (3,5) (2,3) (5,3) (5,5) (1,2) (1,3)
+  parents [Some(5), Some(10), Some(5), Some(9), Some(7), None, Some(2), Some(11), Some(3), Some(6), Some(11), Some(0)]
+  length 14 valid true
+case 160 driver 8 alpha 0.3
+  points (1,3) (1,3) (2,2) (2,1) (2,1) (1,1) (3,2) (1,0) (3,1) (2,3) (1,2) (2,1)
+  nodes (1,3) (1,3) (2,2) (2,1) (2,1) (1,1) (3,2) (1,0) (3,1) (2,3) (1,2) (2,1)
+  parents [Some(1), Some(9), Some(11), Some(4), Some(11), Some(3), Some(8), Some(5), None, Some(2), Some(2), Some(8)]
+  length 8 valid true
+case 161 driver 7 alpha 0
+  points (1,6) (3,7) (6,7) (1,1) (0,6) (0,7) (0,0) (4,2) (6,2) (5,2) (1,2) (5,0) (1,4)
+  nodes (1,6) (3,7) (6,7) (1,1) (0,6) (0,7) (0,0) (4,2) (6,2) (5,2) (1,2) (5,0) (1,4)
+  parents [Some(12), Some(5), Some(1), Some(10), Some(0), Some(4), Some(3), None, Some(9), Some(7), Some(7), Some(9), Some(10)]
+  length 22 valid true
+case 162 driver 3 alpha 1
+  points (22,2) (9,0) (16,23) (2,26) (11,8) (29,15) (1,10) (15,16) (14,23) (9,28) (9,10) (7,28) (29,3) (6,16)
+  nodes (22,2) (9,0) (16,23) (2,26) (11,8) (29,15) (1,10) (15,16) (14,23) (9,28) (9,10) (7,28) (29,3) (6,16) (2,16) (7,26) (9,8) (15,23)
+  parents [Some(4), Some(16), Some(17), None, Some(16), Some(7), Some(14), Some(17), Some(15), Some(11), Some(13), Some(15), Some(5), Some(14), Some(3), Some(3), Some(10), Some(8)]
+  length 114 valid true
+case 163 driver 7 alpha 0.6
+  points (80,119) (86,97) (189,49) (51,135) (197,8) (89,129) (161,99) (141,66) (165,54) (146,43) (166,116) (117,103) (66,114) (17,197) (54,171)
+  nodes (80,119) (86,97) (189,49) (51,135) (197,8) (89,129) (161,99) (141,66) (165,54) (146,43) (166,116) (117,103) (66,114) (17,197) (54,171) (141,99) (89,103) (146,54) (86,103) (80,114) (54,135)
+  parents [Some(19), Some(18), Some(8), Some(20), Some(2), Some(16), Some(15), None, Some(17), Some(17), Some(6), Some(15), Some(19), Some(14), Some(20), Some(7), Some(11), Some(7), Some(16), Some(18), Some(5)]
+  length 470 valid true
+case 164 driver 8 alpha 0.3
+  points (2,0) (5,3) (2,4) (4,2) (0,4) (0,0) (2,2) (1,2) (4,1) (3,3) (0,4) (1,5) (4,4) (3,0) (1,3) (3,2)
+  nodes (2,0) (5,3) (2,4) (4,2) (0,4) (0,0) (2,2) (1,2) (4,1) (3,3) (0,4) (1,5) (4,4) (3,0) (1,3) (3,2) (4,3) (1,4)
+  parents [Some(13), Some(16), Some(12), Some(8), Some(10), Some(0), Some(15), Some(6), None, Some(15), Some(17), Some(17), Some(16), Some(8), Some(7), Some(3), Some(3), Some(2)]
+  length 19 valid true
+case 165 driver 0 alpha 0
+  points (1,2) (1,3)
+  nodes (1,2) (1,3)
+  parents [None, Some(0)]
+  length 1 valid true
+case 166 driver 2 alpha 1
+  points (3,4) (0,6) (3,6)
+  nodes (3,4) (0,6) (3,6)
+  parents [Some(2), Some(2), None]
+  length 5 valid true
+case 167 driver 1 alpha 0.6
+  points (12,0) (6,5) (19,15) (0,7)
+  nodes (12,0) (6,5) (19,15) (0,7) (12,5)
+  parents [Some(4), None, Some(4), Some(1), Some(1)]
+  length 36 valid true
+case 168 driver 3 alpha 0.3
+  points (140,17) (138,183) (27,43) (86,6) (128,71)
+  nodes (140,17) (138,183) (27,43) (86,6) (128,71) (128,17) (86,17)
+  parents [Some(5), Some(4), Some(6), None, Some(5), Some(6), Some(3)]
+  length 326 valid true
+case 169 driver 5 alpha 0
+  points (4,5) (5,4) (5,5) (5,4) (4,2) (0,1)
+  nodes (4,5) (5,4) (5,5) (5,4) (4,2) (0,1)
+  parents [Some(4), Some(3), Some(0), Some(2), Some(5), None]
+  length 10 valid true
+case 170 driver 2 alpha 1
+  points (1,1) (2,3) (1,0) (3,2) (3,3) (1,2) (3,2)
+  nodes (1,1) (2,3) (1,0) (3,2) (3,3) (1,2) (3,2) (2,2)
+  parents [Some(2), Some(7), None, Some(7), Some(6), Some(0), Some(3), Some(5)]
+  length 6 valid true
+case 171 driver 2 alpha 0.6
+  points (6,4) (2,4) (3,4) (0,3) (3,2) (1,3) (6,0) (7,2)
+  nodes (6,4) (2,4) (3,4) (0,3) (3,2) (1,3) (6,0) (7,2) (6,2)
+  parents [Some(2), Some(2), None, Some(5), Some(2), Some(1), Some(8), Some(8), Some(0)]
+  length 14 valid true
+case 172 driver 5 alpha 0.3
+  points (14,9) (20,4) (12,15) (13,24) (16,16) (17,18) (15,3) (16,5) (20,29)
+  nodes (14,9) (20,4) (12,15) (13,24) (16,16) (17,18) (15,3) (16,5) (20,29) (17,24) (14,15) (15,5)
+  parents [Some(10), Some(7), Some(10), Some(9), Some(5), None, Some(11), Some(11), Some(9), Some(5), Some(4), Some(0)]
+  length 45 valid true
+case 173 driver 4 alpha 0
+  points (66,148) (82,125) (111,83) (19,65) (95,20) (81,148) (22,25) (13,38) (87,42) (132,14)
+  nodes (66,148) (82,125) (111,83) (19,65) (95,20) (81,148) (22,25) (13,38) (87,42) (132,14) (87,83) (87,25) (19,38)
+  parents [Some(5), Some(10), Some(10), Some(12), None, Some(1), Some(11), Some(12), Some(11), Some(4), Some(8), Some(4), Some(6)]
+  length 338 valid true
+case 174 driver 1 alpha 1
+  points (0,5) (4,2) (5,0) (1,1) (2,2) (4,3) (5,0) (2,5) (5,1) (3,2) (1,4)
+  nodes (0,5) (4,2) (5,0) (1,1) (2,2) (4,3) (5,0) (2,5) (5,1) (3,2) (1,4) (2,4)
+  parents [Some(10), None, Some(6), Some(4), Some(9), Some(1), Some(8), Some(11), Some(1), Some(1), Some(11), Some(4)]
+  length 14 valid true
+case 175 driver 0 alpha 0.6
+  points (0,0) (1,1) (3,2) (1,0) (2,2) (2,2) (0,2) (3,3) (3,3) (2,3) (0,0) (3,3)
+  nodes (0,0) (1,1) (3,2) (1,0) (2,2) (2,2) (0,2) (3,3) (3,3) (2,3) (0,0) (3,3)
+  parents [None, Some(3), Some(5), Some(10), Some(6), Some(4), Some(10), Some(9), Some(7), Some(5), Some(0), Some(8)]
+  length 9 valid true
+case 176 driver 1 alpha 0.3
+  points (5,1) (2,7) (7,2) (3,7) (7,2) (3,4) (7,6) (4,2) (1,6) (3,3) (1,2) (5,4) (3,0)
+  nodes (5,1) (2,7) (7,2) (3,7) (7,2) (3,4) (7,6) (4,2) (1,6) (3,3) (1,2) (5,4) (3,0) (5,2) (3,6) (3,2) (3,2)
+  parents [Some(13), None, Some(13), Some(1), Some(2), Some(14), Some(14), Some(15), Some(1), Some(5), Some(15), Some(5), Some(16), Some(7), Some(3), Some(16), Some(9)]
+  length 23 valid true
+case 177 driver 11 alpha 0
+  points (21,12) (13,5) (12,7) (26,18) (7,20) (27,4) (12,23) (0,25) (11,22) (7,11) (22,17) (9,26) (23,16) (13,8)
+  nodes (21,12) (13,5) (12,7) (26,18) (7,20) (27,4) (12,23) (0,25) (11,22) (7,11) (22,17) (9,26) (23,16) (13,8) (21,8) (23,17) (13,7) (11,23) (9,25)
+  parents [Some(14), Some(16), Some(9), Some(15), Some(8), Some(14), Some(17), Some(18), Some(17), Some(4), Some(0), None, Some(15), Some(16), Some(13), Some(10), Some(2), Some(18), Some(11)]
+  length 78 valid true
+case 178 driver 0 alpha 1
+  points (123,167) (169,8) (117,98) (99,60) (56,165) (124,194) (133,5) (54,64) (181,175) (57,73) (7,183) (156,165) (149,9) (21,181) (145,103)
+  nodes (123,167) (169,8) (117,98) (99,60) (56,165) (124,194) (133,5) (54,64) (181,175) (57,73) (7,183) (156,165) (149,9) (21,181) (145,103) (133,103) (56,167) (123,103) (99,73) (156,167) (124,167)
+  parents [None, Some(12), Some(17), Some(18), Some(16), Some(20), Some(15), Some(9), Some(19), Some(18), Some(13), Some(19), Some(14), Some(16), Some(15), Some(17), Some(0), Some(0), Some(2), Some(20), Some(0)]
+  length 653 valid true
+case 179 driver 0 alpha 0.6
+  points (4,0) (5,3) (2,5) (2,5) (3,2) (4,3) (1,2) (1,5) (3,2) (4,2) (0,5) (3,5) (1,2) (5,0) (2,5) (3,2)
+  nodes (4,0) (5,3) (2,5) (2,5) (3,2) (4,3) (1,2) (1,5) (3,2) (4,2) (0,5) (3,5) (1,2) (5,0) (2,5) (3,2)
+  parents [None, Some(5), Some(3), Some(14), Some(8), Some(9), Some(12), Some(2), Some(15), Some(0), Some(7), Some(15), Some(4), Some(0), Some(11), Some(9)]
+  length 14 valid true
+case 180 driver 0 alpha 0.3
+  points (0,3) (0,1)
+  nodes (0,3) (0,1)
+  parents [None, Some(0)]
+  length 2 valid true
+case 181 driver 2 alpha 0
+  points (1,3) (1,3) (1,0)
+  nodes (1,3) (1,3) (1,0)
+  parents [Some(2), Some(0), None]
+  length 3 valid true
+case 182 driver 2 alpha 1
+  points (14,18) (21,1) (4,20) (15,3)
+  nodes (14,18) (21,1) (4,20) (15,3)
+  parents [Some(2), Some(3), None, Some(0)]
+  length 36 valid true
+case 183 driver 4 alpha 0.6
+  points (140,195) (121,10) (52,62) (115,4) (100,177)
+  nodes (140,195) (121,10) (52,62) (115,4) (100,177) (100,62) (115,10)
+  parents [Some(4), Some(6), Some(5), Some(6), None, Some(4), Some(5)]
+  length 300 valid true
+case 184 driver 2 alpha 0.3
+  points (1,3) (4,1) (2,4) (4,4) (0,1) (5,4)
+  nodes (1,3) (4,1) (2,4) (4,4) (0,1) (5,4)
+  parents [Some(2), Some(3), None, Some(2), Some(0), Some(3)]
+  length 11 valid true
+case 185 driver 5 alpha 0
+  points (1,2) (1,2) (2,3) (0,2) (2,2) (0,2) (1,0)
+  nodes (1,2) (1,2) (2,3) (0,2) (2,2) (0,2) (1,0)
+  parents [Some(5), Some(0), Some(4), Some(5), Some(1), None, Some(0)]
+  length 5 valid true
+case 186 driver 3 alpha 1
+  points (7,4) (2,1) (0,1) (4,1) (2,1) (2,2) (3,5) (5,1)
+  nodes (7,4) (2,1) (0,1) (4,1) (2,1) (2,2) (3,5) (5,1) (3,1)
+  parents [Some(7), Some(4), Some(1), None, Some(8), Some(4), Some(8), Some(3), Some(3)]
+  length 15 valid true
+case 187 driver 1 alpha 0.6
+  points (24,24) (27,15) (9,26) (16,15) (11,21) (15,4) (2,27) (12,0) (15,20)
+  nodes (24,24) (27,15) (9,26) (16,15) (11,21) (15,4) (2,27) (12,0) (15,20) (24,15) (15,15)
+  parents [Some(9), None, Some(4), Some(9), Some(8), Some(10), Some(2), Some(5), Some(10), Some(1), Some(3)]
+  length 64 valid true
+case 188 driver 4 alpha 0.3
+  points (2,43) (150,66) (79,59) (18,182) (170,46) (103,186) (95,18) (98,14) (59,118) (167,42)
+  nodes (2,43) (150,66) (79,59) (18,182) (170,46) (103,186) (95,18) (98,14) (59,118) (167,42) (59,182) (59,59) (95,59) (150,59) (167,46)
+  parents [Some(11), Some(13), Some(12), Some(10), None, Some(10), Some(12), Some(6), Some(11), Some(14), Some(8), Some(2), Some(13), Some(14), Some(4)]
+  length 468 valid true
+case 189 driver 4 alpha 0
+  points (3,2) (5,5) (1,0) (2,3) (0,5) (0,5) (3,0) (3,4) (1,0) (2,0) (3,4)
+  nodes (3,2) (5,5) (1,0) (2,3) (0,5) (0,5) (3,0) (3,4) (1,0) (2,0) (3,4) (3,3)
+  parents [Some(11), Some(10), Some(8), Some(4), None, Some(4), Some(0), Some(11), Some(9), Some(6), Some(7), Some(3)]
+  length 14 valid true
+case 190 driver 0 alpha 1
+  points (2,1) (2,0) (1,3) (0,3) (3,3) (1,2) (3,0) (0,2) (0,1) (1,1) (1,1) (1,1)
+  nodes (2,1) (2,0) (1,3) (0,3) (3,3) (1,2) (3,0) (0,2) (0,1) (1,1) (1,1) (1,1)
+  parents [None, Some(0), Some(5), Some(7), Some(0), Some(11), Some(1), Some(5), Some(9), Some(10), Some(11), Some(0)]
+  length 11 valid true
+case 191 driver 9 alpha 0.6
+  points (0,6) (7,2) (1,3) (4,4) (5,3) (1,1) (6,7) (4,5) (4,3) (6,2) (3,7) (0,4) (2,7)
+  nodes (0,6) (7,2) (1,3) (4,4) (5,3) (1,1) (6,7) (4,5) (4,3) (6,2) (3,7) (0,4) (2,7) (6,3)
+  parents [Some(11), Some(9), Some(8), Some(8), Some(13), Some(2), Some(13), Some(3), Some(4), None, Some(6), Some(2), Some(10), Some(9)]
+  length 23 valid true
+case 192 driver 1 alpha 0.3
+  points (14,28) (27,7) (0,9) (13,24) (17,16) (7,25) (26,15) (10,27) (15,10) (24,14) (16,0) (0,4) (29,8) (19,0)
+  nodes (14,28) (27,7) (0,9) (13,24) (17,16) (7,25) (26,15) (10,27) (15,10) (24,14) (16,0) (0,4) (29,8) (19,0) (13,27) (17,14) (27,8) (26,14)
+  parents [Some(14), None, Some(8), Some(4), Some(15), Some(7), Some(17), Some(14), Some(15), Some(17), Some(13), Some(2), Some(16), Some(1), Some(3), Some(9), Some(1), Some(16)]
+  length 92 valid true
+case 193 driver 4 alpha 0
+  points (150,36) (110,88) (166,90) (114,152) (168,8) (125,64) (123,92) (183,191) (57,183) (7,168) (142,103) (50,150) (121,131) (145,163) (101,137)
+  nodes (150,36) (110,88) (166,90) (114,152) (168,8) (125,64) (123,92) (183,191) (57,183) (7,168) (142,103) (50,150) (121,131) (145,163) (101,137) (50,168) (114,137) (142,92) (123,88)
+  parents [Some(4), Some(18), Some(17), Some(16), None, Some(0), Some(18), Some(13), Some(15), Some(15), Some(17), Some(14), Some(6), Some(3), Some(16), Some(11), Some(12), Some(6), Some(5)]
+  length 535 valid true
+case 194 driver 5 alpha 1
+  points (3,2) (0,4) (0,0) (5,3) (4,3) (1,3) (0,0) (2,5) (3,1) (1,1) (0,1) (2,1) (4,4) (1,4) (5,3) (3,1)
+  nodes (3,2) (0,4) (0,0) (5,3) (4,3) (1,3) (0,0) (2,5) (3,1) (1,1) (0,1) (2,1) (4,4) (1,4) (5,3) (3,1) (3,3)
+  parents [Some(16), Some(13), Some(6), Some(4), Some(16), None, Some(10), Some(13), Some(15), Some(5), Some(9), Some(9), Some(4), Some(5), Some(3), Some(0), Some(5)]
+  length 16 valid true
+case 195 driver 1 alpha 0.6
+  points (3,1) (2,3)
+  nodes (3,1) (2,3)
+  parents [Some(1), None]
+  length 3 valid true
+case 196 driver 0 alpha 0.3
+  points (1,3) (4,6) (0,4)
+  nodes (1,3) (4,6) (0,4) (1,4)
+  parents [None, Some(3), Some(3), Some(0)]
+  length 7 valid true
+case 197 driver 0 alpha 0
+  points (10,8) (2,14) (6,21) (7,5)
+  nodes (10,8) (2,14) (6,21) (7,5) (6,14) (7,8)
+  parents [None, Some(4), Some(4), Some(5), Some(5), Some(0)]
+  length 24 valid true
+case 198 driver 1 alpha 1
+  points (87,114) (198,47) (102,158) (141,167) (158,166)
+  nodes (87,114) (198,47) (102,158) (141,167) (158,166) (102,114) (158,114)
+  parents [Some(5), None, Some(5), Some(4), Some(6), Some(6), Some(1)]
+  length 292 valid true
+case 199 driver 2 alpha 0.6
+  points (4,2) (4,5) (3,0) (4,1) (2,1) (4,1)
+  nodes (4,2) (4,5) (3,0) (4,1) (2,1) (4,1) (3,1)
+  parents [Some(5), Some(0), None, Some(6), Some(6), Some(3), Some(2)]
+  length 7 valid true
+case 200 driver 2 alpha 0.3
+  points (0,3) (0,2) (3,2) (3,0) (0,3) (1,0) (2,1)
+  nodes (0,3) (0,2) (3,2) (3,0) (0,3) (1,0) (2,1) (3,1)
+  parents [Some(1), Some(2), None, Some(7), Some(0), Some(6), Some(7), Some(2)]
+  length 9 valid true
+case 201 driver 3 alpha 0
+  points (2,4) (6,5) (4,3) (0,2) (5,7) (5,5) (1,2) (4,2)
+  nodes (2,4) (6,5) (4,3) (0,2) (5,7) (5,5) (1,2) (4,2) (4,4)
+  parents [Some(6), Some(5), Some(8), None, Some(5), Some(8), Some(3), Some(2), Some(0)]
+  length 13 valid true
+case 202 driver 7 alpha 1
+  points (23,16) (21,28) (8,8) (0,24) (7,18) (23,21) (25,3) (4,2) (7,14)
+  nodes (23,16) (21,28) (8,8) (0,24) (7,18) (23,21) (25,3) (4,2) (7,14) (4,14) (4,8) (7,16) (4,3)
+  parents [Some(11), Some(4), Some(10), Some(9), Some(11), Some(0), Some(12), None, Some(9), Some(10), Some(12), Some(8), Some(7)]
+  length 103 valid true
+case 203 driver 6 alpha 0.6
+  points (126,69) (55,41) (51,98) (97,40) (152,14) (185,158) (185,1) (193,83) (51,171) (71,96)
+  nodes (126,69) (55,41) (51,98) (97,40) (152,14) (185,158) (185,1) (193,83) (51,171) (71,96) (126,40) (71,41) (185,14) (185,83)
+  parents [Some(10), Some(11), Some(9), Some(10), Some(12), Some(13), None, Some(13), Some(2), Some(11), Some(4), Some(3), Some(6), Some(12)]
+  length 501 valid true
+case 204 driver 1 alpha 0.3
+  points (3,4) (3,5) (4,1) (3,0) (1,0) (1,0) (5,2) (4,0) (1,1) (3,4) (3,4)
+  nodes (3,4) (3,5) (4,1) (3,0) (1,0) (1,0) (5,2) (4,0) (1,1) (3,4) (3,4) (4,2)
+  parents [Some(9), None, Some(11), Some(7), Some(5), Some(3), Some(11), Some(2), Some(5), Some(10), Some(1), Some(0)]
+  length 11 valid true
+case 205 driver 4 alpha 0
+  points (0,2) (2,3) (2,3) (3,1) (1,3) (0,3) (0,2) (3,3) (1,1) (1,0) (0,2) (0,1)
+  nodes (0,2) (2,3) (2,3) (3,1) (1,3) (0,3) (0,2) (3,3) (1,1) (1,0) (0,2) (0,1)
+  parents [Some(6), Some(4), Some(1), Some(8), None, Some(4), Some(10), Some(2), Some(11), Some(8), Some(5), Some(0)]
+  length 9 valid true
+case 206 driver 4 alpha 1
+  points (5,1) (3,6) (6,1) (5,7) (5,2) (7,3) (2,1) (0,1) (4,5) (3,0) (0,3) (2,2) (3,6)
+  nodes (5,1) (3,6) (6,1) (5,7) (5,2) (7,3) (2,1) (0,1) (4,5) (3,0) (0,3) (2,2) (3,6) (5,5) (5,3)
+  parents [Some(4), Some(8), Some(0), Some(13), None, Some(14), Some(11), Some(6), Some(13), Some(0), Some(11), Some(4), Some(1), Some(14), Some(4)]
+  length 24 valid true
+case 207 driver 8 alpha 0.6
+  points (21,29) (5,21) (1,6) (22,5) (10,26) (2,21) (19,29) (26,20) (0,8) (11,10) (23,0) (23,24) (22,5) (6,29)
+  nodes (21,29) (5,21) (1,6) (22,5) (10,26) (2,21) (19,29) (26,20) (0,8) (11,10) (23,0) (23,24) (22,5) (6,29) (19,26) (6,26) (2,10) (1,8)
+  parents [Some(6), Some(5), Some(17), Some(12), Some(15), Some(16), Some(14), Some(11), None, Some(16), Some(3), Some(14), Some(9), Some(15), Some(4), Some(1), Some(17), Some(8)]
+  length 91 valid true
+case 208 driver 1 alpha 0.3
+  points (140,35) (129,85) (145,149) (98,38) (185,113) (132,17) (75,194) (42,20) (156,149) (67,20) (78,165) (91,26) (112,84) (121,100) (93,26)
+  nodes (140,35) (129,85) (145,149) (98,38) (185,113) (132,17) (75,194) (42,20) (156,149) (67,20) (78,165) (91,26) (112,84) (121,100) (93,26) (145,113) (129,38) (132,35) (129,100) (129,84)
+  parents [Some(17), None, Some(15), Some(16), Some(15), Some(17), Some(10), Some(9), Some(2), Some(11), Some(2), Some(14), Some(19), Some(18), Some(3), Some(18), Some(19), Some(16), Some(1), Some(1)]
+  length 455 valid true
+case 209 driver 2 alpha 0
+  points (1,0) (1,2) (1,5) (1,1) (4,0) (1,1) (2,1) (2,4) (4,4) (0,4) (4,1) (2,2) (4,0) (3,5) (1,2) (5,3)
+  nodes (1,0) (1,2) (1,5) (1,1) (4,0) (1,1) (2,1) (2,4) (4,4) (0,4) (4,1) (2,2) (4,0) (3,5) (1,2) (5,3) (3,4) (1,4)
+  parents [Some(3), Some(5), None, Some(5), Some(12), Some(6), Some(11), Some(17), Some(16), Some(17), Some(6), Some(7), Some(10), Some(16), Some(1), Some(8), Some(7), Some(2)]
+  length 17 valid true
+case 210 driver 1 alpha 1
+  points (3,1) (3,2)
+  nodes (3,1) (3,2)
+  parents [Some(1), None]
+  length 1 valid true
+case 211 driver 2 alpha 0.6
+  points (2,2) (0,6) (5,7)
+  nodes (2,2) (0,6) (5,7) (2,6)
+  parents [Some(3), Some(3), None, Some(2)]
+  length 10 valid true
+case 212 driver 3 alpha 0.3
+  points (9,3) (26,21) (15,6) (13,19)
+  nodes (9,3) (26,21) (15,6) (13,19) (15,19)
+  parents [Some(2), Some(4), Some(4), None, Some(3)]
+  length 37 valid true
+case 213 driver 1 alpha 0
+  points (6,11) (88,7) (127,189) (10,150) (184,10)
+  nodes (6,11) (88,7) (127,189) (10,150) (184,10) (10,11) (88,10)
+  parents [Some(5), None, Some(3), Some(5), Some(6), Some(6), Some(1)]
+  length 477 valid true
+case 214 driver 1 alpha 1
+  points (0,3) (2,1) (5,4) (1,5) (1,0) (4,4)
+  nodes (0,3) (2,1) (5,4) (1,5) (1,0) (4,4) (1,3) (2,3)
+  parents [Some(6), None, Some(5), Some(6), Some(1), Some(7), Some(7), Some(1)]
+  length 12 valid true
+case 215 driver 3 alpha 0.6
+  points (1,0) (3,3) (2,3) (3,0) (0,0) (0,1) (0,2)
+  nodes (1,0) (3,3) (2,3) (3,0) (0,0) (0,1) (0,2)
+  parents [Some(3), Some(3), Some(1), None, Some(0), Some(4), Some(5)]
+  length 9 valid true
+case 216 driver 6 alpha 0.3
+  points (2,5) (7,7) (7,0) (3,4) (2,3) (4,7) (5,7) (6,4)
+  nodes (2,5) (7,7) (7,0) (3,4) (2,3) (4,7) (5,7) (6,4) (6,7) (2,4)
+  parents [Some(9), Some(8), Some(7), Some(7), Some(9), Some(6), None, Some(8), Some(6), Some(3)]
+  length 17 valid true
+case 217 driver 8 alpha 0
+  points (3,0) (19,27) (13,9) (6,6) (12,14) (21,8) (14,9) (28,6) (6,23)
+  nodes (3,0) (19,27) (13,9) (6,6) (12,14) (21,8) (14,9) (28,6) (6,23) (12,23) (12,9)
+  parents [Some(3), Some(9), Some(10), Some(10), Some(9), Some(6), Some(2), Some(5), None, Some(8), Some(4)]
+  length 68 valid true
+case 218 driver 8 alpha 1
+  points (83,109) (191,161) (180,49) (127,141) (53,126) (62,5) (123,50) (199,169) (141,195) (97,178)
+  nodes (83,109) (191,161) (180,49) (127,141) (53,126) (62,5) (123,50) (199,169) (141,195) (97,178) (191,169) (180,169) (83,126) (127,178) (123,126) (141,178)
+  parents [Some(12), Some(10), Some(11), Some(13), Some(12), Some(6), Some(14), Some(10), None, Some(13), Some(11), Some(15), Some(14), Some(15), Some(3), Some(8)]
+  length 581 valid true
+case 219 driver 8 alpha 0.6
+  points (3,0) (3,5) (5,1) (2,4) (0,2) (3,2) (2,2) (3,4) (3,4) (4,0) (2,1)
+  nodes (3,0) (3,5) (5,1) (2,4) (0,2) (3,2) (2,2) (3,4) (3,4) (4,0) (2,1) (3,1)
+  parents [Some(11), Some(8), Some(11), Some(7), Some(6), Some(7), Some(5), Some(8), None, Some(0), Some(6), Some(5)]
+  length 13 valid true
+case 220 driver 10 alpha 0.3
+  points (0,2) (0,3) (0,1) (2,3) (2,3) (3,2) (1,3) (3,0) (2,2) (2,3) (3,2) (3,2)
+  nodes (0,2) (0,3) (0,1) (2,3) (2,3) (3,2) (1,3) (3,0) (2,2) (2,3) (3,2) (3,2)
+  parents [Some(1), Some(6), Some(0), Some(8), Some(3), Some(10), Some(9), Some(5), Some(11), Some(4), None, Some(10)]
+  length 8 valid true
+case 221 driver 8 alpha 0
+  points (1,2) (5,4) (0,0) (3,3) (0,5) (5,0) (5,7) (1,4) (2,3) (7,1) (2,0) (2,4) (0,4)
+  nodes (1,2) (5,4) (0,0) (3,3) (0,5) (5,0) (5,7) (1,4) (2,3) (7,1) (2,0) (2,4) (0,4) (1,0)
+  parents [Some(7), Some(11), Some(13), Some(8), Some(12), Some(10), Some(1), Some(11), None, Some(5), Some(13), Some(8), Some(7), Some(0)]
+  length 23 valid true
+case 222 driver 9 alpha 1
+  points (14,26) (28,1) (22,27) (15,3) (8,4) (27,19) (19,15) (29,3) (10,1) (28,9) (20,2) (0,7) (10,28) (8,23)
+  nodes (14,26) (28,1) (22,27) (15,3) (8,4) (27,19) (19,15) (29,3) (10,1) (28,9) (20,2) (0,7) (10,28) (8,23) (8,7) (15,7) (14,23) (20,7) (20,9) (28,3) (27,9)
+  parents [Some(16), Some(19), Some(5), Some(15), Some(14), Some(20), Some(18), Some(19), Some(3), None, Some(17), Some(14), Some(0), Some(16), Some(15), Some(17), Some(6), Some(18), Some(20), Some(9), Some(9)]
+  length 116 valid true
+case 223 driver 9 alpha 0.6
+  points (39,123) (92,143) (52,163) (20,171) (85,169) (128,130) (3,67) (104,98) (91,137) (166,103) (108,161) (164,152) (166,43) (112,90) (101,132)
+  nodes (39,123) (92,143) (52,163) (20,171) (85,169) (128,130) (3,67) (104,98) (91,137) (166,103) (108,161) (164,152) (166,43) (112,90) (101,132) (128,103) (108,132) (91,132) (104,90) (85,163) (164,103)
+  parents [Some(17), Some(8), Some(19), Some(2), Some(19), Some(15), Some(18), Some(15), Some(17), None, Some(16), Some(20), Some(9), Some(18), Some(16), Some(20), Some(5), Some(14), Some(7), Some(10), Some(9)]
+  length 588 valid true
+case 224 driver 12 alpha 0.3
+  points (3,2) (2,5) (5,4) (4,1) (3,0) (0,3) (1,5) (1,4) (4,2) (0,3) (4,2) (1,0) (2,5) (5,0) (5,2) (2,2)
+  nodes (3,2) (2,5) (5,4) (4,1) (3,0) (0,3) (1,5) (1,4) (4,2) (0,3) (4,2) (1,0) (2,5) (5,0) (5,2) (2,2)
+  parents [Some(15), Some(12), Some(14), Some(8), Some(0), Some(9), Some(1), Some(6), Some(0), Some(7), Some(8), Some(4), None, Some(4), Some(10), Some(1)]
+  length 19 valid true
+case 225 driver 0 alpha 0
+  points (0,0) (1,0)
+  nodes (0,0) (1,0)
+  parents [None, Some(0)]
+  length 1 valid true
+case 226 driver 0 alpha 1
+  points (3,0) (6,7) (1,3)
+  nodes (3,0) (6,7) (1,3) (3,3)
+  parents [None, Some(3), Some(3), Some(0)]
+  length 12 valid true
+case 227 driver 1 alpha 0.6
+  points (10,28) (13,9) (19,22) (24,29)
+  nodes (10,28) (13,9) (19,22) (24,29) (13,22)
+  parents [Some(4), None, Some(4), Some(2), Some(1)]
+  length 40 valid true
+case 228 driver 0 alpha 0.3
+  points (91,132) (47,25) (166,190) (143,12) (164,117)
+  nodes (91,132) (47,25) (166,190) (143,12) (164,117) (143,117) (91,117)
+  parents [None, Some(6), Some(4), Some(5), Some(5), Some(6), Some(0)]
+  length 404 valid true
+case 229 driver 3 alpha 0
+  points (3,0) (5,0) (4,1) (0,3) (3,4) (4,2)
+  nodes (3,0) (5,0) (4,1) (0,3) (3,4) (4,2) (4,0) (3,3)
+  parents [Some(6), Some(6), Some(5), None, Some(7), Some(7), Some(2), Some(3)]
+  length 10 valid true
+case 230 driver 1 alpha 1
+  points (2,2) (0,2) (3,1) (0,3) (2,3) (3,2) (2,3)
+  nodes (2,2) (0,2) (3,1) (0,3) (2,3) (3,2) (2,3)
+  parents [Some(1), None, Some(5), Some(1), Some(0), Some(0), Some(4)]
+  length 6 valid true
+case 231 driver 3 alpha 0.6
+  points (6,2) (6,0) (5,0) (2,0) (3,6) (1,1) (5,4) (1,2)
+  nodes (6,2) (6,0) (5,0) (2,0) (3,6) (1,1) (5,4) (1,2) (2,1)
+  parents [Some(1), Some(2), Some(3), None, Some(8), Some(8), Some(2), Some(5), Some(3)]
+  length 19 valid true
+case 232 driver 1 alpha 0.3
+  points (25,6) (25,12) (0,26) (14,14) (26,15) (8,19) (11,12) (29,22) (17,8)
+  nodes (25,6) (25,12) (0,26) (14,14) (26,15) (8,19) (11,12) (29,22) (17,8) (11,14) (25,14) (25,8)
+  parents [Some(11), None, Some(5), Some(10), Some(10), Some(9), Some(9), Some(4), Some(11), Some(3), Some(1), Some(1)]
+  length 67 valid true
+case 233 driver 3 alpha 0
+  points (129,142) (138,14) (196,182) (55,175) (162,173) (165,93) (57,152) (49,127) (71,168) (145,78)
+  nodes (129,142) (138,14) (196,182) (55,175) (162,173) (165,93) (57,152) (49,127) (71,168) (145,78) (145,142) (145,93) (57,142) (57,168)
+  parents [Some(12), Some(9), Some(4), None, Some(10), Some(11), Some(13), Some(12), Some(13), Some(11), Some(0), Some(10), Some(6), Some(3)]
+  length 406 valid true
+case 234 driver 2 alpha 1
+  points (3,5) (2,3) (5,4) (3,5) (5,5) (0,5) (4,1) (0,4) (5,0) (2,5) (2,5)
+  nodes (3,5) (2,3) (5,4) (3,5) (5,5) (0,5) (4,1) (0,4) (5,0) (2,5) (2,5) (2,4) (5,1) (3,4)
+  parents [Some(13), Some(11), None, Some(0), Some(2), Some(7), Some(12), Some(11), Some(12), Some(0), Some(9), Some(13), Some(2), Some(2)]
+  length 15 valid true
+case 235 driver 0 alpha 0.6
+  points (1,3) (1,2) (0,3) (2,2) (1,2) (2,1) (0,1) (3,0) (1,1) (0,3) (1,2) (1,2)
+  nodes (1,3) (1,2) (0,3) (2,2) (1,2) (2,1) (0,1) (3,0) (1,1) (0,3) (1,2) (1,2)
+  parents [None, Some(4), Some(9), Some(11), Some(10), Some(3), Some(8), Some(5), Some(1), Some(0), Some(11), Some(0)]
+  length 8 valid true
+case 236 driver 0 alpha 0.3
+  points (6,4) (3,4) (7,5) (3,1) (3,1) (5,2) (7,2) (7,4) (4,6) (1,0) (0,1) (2,5) (3,5)
+  nodes (6,4) (3,4) (7,5) (3,1) (3,1) (5,2) (7,2) (7,4) (4,6) (1,0) (0,1) (2,5) (3,5) (1,1)
+  parents [None, Some(0), Some(7), Some(4), Some(1), Some(6), Some(7), Some(0), Some(12), Some(13), Some(13), Some(12), Some(1), Some(3)]
+  length 20 valid true
+case 237 driver 2 alpha 0
+  points (3,12) (7,9) (6,11) (27,10) (28,14) (29,12) (9,24) (27,7) (0,6) (22,21) (19,27) (4,19) (26,10) (4,9)
+  nodes (3,12) (7,9) (6,11) (27,10) (28,14) (29,12) (9,24) (27,7) (0,6) (22,21) (19,27) (4,19) (26,10) (4,9) (19,24) (28,12) (6,9) (4,12)
+  parents [Some(17), Some(16), None, Some(15), Some(9), Some(15), Some(11), Some(3), Some(13), Some(14), Some(14), Some(17), Some(3), Some(16), Some(6), Some(4), Some(2), Some(13)]
+  length 75 valid true
+case 238 driver 7 alpha 1
+  points (24,75) (38,73) (167,111) (65,125) (166,162) (157,75) (151,101) (93,121) (108,102) (81,107) (80,85) (153,156) (120,79) (18,164) (182,91)
+  nodes (24,75) (38,73) (167,111) (65,125) (166,162) (157,75) (151,101) (93,121) (108,102) (81,107) (80,85) (153,156) (120,79) (18,164) (182,91) (153,121) (38,75) (108,121) (120,101) (81,121)
+  parents [Some(16), Some(16), Some(15), Some(19), Some(11), Some(6), Some(18), None, Some(17), Some(19), Some(9), Some(15), Some(18), Some(3), Some(2), Some(17), Some(10), Some(7), Some(8), Some(7)]
+  length 513 valid true
+case 239 driver 11 alpha 0.6
+  points (5,1) (2,0) (3,4) (3,3) (3,2) (0,4) (5,1) (5,5) (2,2) (0,2) (2,1) (3,3) (5,3) (4,0) (5,2) (0,3)
+  nodes (5,1) (2,0) (3,4) (3,3) (3,2) (0,4) (5,1) (5,5) (2,2) (0,2) (2,1) (3,3) (5,3) (4,0) (5,2) (0,3)
+  parents [Some(6), Some(10), Some(11), Some(11), Some(3), Some(15), Some(14), Some(12), Some(4), Some(15), Some(8), None, Some(11), Some(4), Some(12), Some(3)]
+  length 19 valid true
+case 240 driver 0 alpha 0.3
+  points (0,2) (3,1)
+  nodes (0,2) (3,1)
+  parents [None, Some(0)]
+  length 4 valid true
+case 241 driver 1 alpha 0
+  points (3,3) (1,5) (0,6)
+  nodes (3,3) (1,5) (0,6)
+  parents [Some(1), None, Some(1)]
+  length 6 valid true
+case 242 driver 3 alpha 1
+  points (15,25) (23,8) (27,26) (7,10)
+  nodes (15,25) (23,8) (27,26) (7,10) (15,10)
+  parents [Some(4), Some(4), Some(0), None, Some(3)]
+  length 46 valid true
+case 243 driver 1 alpha 0.6
+  points (8,10) (116,23) (13,39) (127,182) (159,168)
+  nodes (8,10) (116,23) (13,39) (127,182) (159,168) (116,39) (127,168)
+  parents [Some(2), None, Some(5), Some(6), Some(6), Some(1), Some(5)]
+  length 339 valid true
+case 244 driver 1 alpha 0.3
+  points (5,3) (4,2) (4,3) (5,5) (3,5) (5,0)
+  nodes (5,3) (4,2) (4,3) (5,5) (3,5) (5,0)
+  parents [Some(2), None, Some(1), Some(0), Some(3), Some(1)]
+  length 9 valid true
+case 245 driver 5 alpha 0
+  points (0,1) (3,2) (3,0) (2,0) (0,3) (1,3) (0,0)
+  nodes (0,1) (3,2) (3,0) (2,0) (0,3) (1,3) (0,0)
+  parents [Some(4), Some(2), Some(3), Some(6), Some(5), None, Some(0)]
+  length 9 valid true
+case 246 driver 5 alpha 1
+  points (6,2) (4,2) (3,3) (4,2) (3,3) (7,0) (7,7) (5,6)
+  nodes (6,2) (4,2) (3,3) (4,2) (3,3) (7,0) (7,7) (5,6) (7,2) (5,2)
+  parents [Some(8), Some(3), Some(1), Some(9), Some(2), None, Some(8), Some(9), Some(5), Some(0)]
+  length 16 valid true
+case 247 driver 3 alpha 0.6
+  points (20,0) (5,8) (29,26) (19,29) (17,29) (10,22) (21,21) (23,20) (2,21)
+  nodes (20,0) (5,8) (29,26) (19,29) (17,29) (10,22) (21,21) (23,20) (2,21) (5,21) (21,26) (21,20)
+  parents [Some(11), Some(9), Some(10), None, Some(3), Some(4), Some(10), Some(11), Some(9), Some(5), Some(3), Some(6)]
+  length 80 valid true
+case 248 driver 5 alpha 0.3
+  points (173,25) (125,20) (43,79) (21,189) (51,147) (110,99) (71,155) (51,88) (10,28) (38,190)
+  nodes (173,25) (125,20) (43,79) (21,189) (51,147) (110,99) (71,155) (51,88) (10,28) (38,190) (110,88) (51,155) (125,25) (38,189)
+  parents [Some(12), Some(12), Some(7), Some(13), Some(7), None, Some(11), Some(10), Some(2), Some(13), Some(5), Some(4), Some(10), Some(11)]
+  length 454 valid true
+case 249 driver 4 alpha 0
+  points (0,4) (5,0) (3,3) (4,1) (4,5) (1,4) (5,1) (2,4) (3,0) (0,4) (3,0)
+  nodes (0,4) (5,0) (3,3) (4,1) (4,5) (1,4) (5,1) (2,4) (3,0) (0,4) (3,0) (3,4)
+  parents [Some(9), Some(6), Some(11), Some(2), None, Some(7), Some(3), Some(11), Some(10), Some(5), Some(1), Some(4)]
+  length 13 valid true
+case 250 driver 1 alpha 1
+  points (2,1) (0,3) (1,1) (2,1) (3,1) (0,3) (2,1) (0,2) (3,0) (3,2) (1,0) (1,0)
+  nodes (2,1) (0,3) (1,1) (2,1) (3,1) (0,3) (2,1) (0,2) (3,0) (3,2) (1,0) (1,0) (1,2)
+  parents [Some(2), None, Some(12), Some(0), Some(9), Some(1), Some(3), Some(1), Some(4), Some(12), Some(11), Some(2), Some(7)]
+  length 9 valid true
+case 251 driver 2 alpha 0.6
+  points (7,5) (2,5) (2,3) (7,3) (3,5) (5,0) (5,4) (7,1) (1,1) (1,0) (3,7) (6,3) (3,7)
+  nodes (7,5) (2,5) (2,3) (7,3) (3,5) (5,0) (5,4) (7,1) (1,1) (1,0) (3,7) (6,3) (3,7) (5,3) (5,3)
+  parents [Some(3), Some(2), None, Some(11), Some(1), Some(14), Some(13), Some(3), Some(2), Some(8), Some(4), Some(13), Some(10), Some(14), Some(2)]
+  length 22 valid true
+case 252 driver 2 alpha 0.3
+  points (28,28) (23,12) (27,20) (23,21) (18,16) (8,27) (20,14) (28,15) (7,22) (4,21) (6,1) (11,26) (2,21) (6,2)
+  nodes (28,28) (23,12) (27,20) (23,21) (18,16) (8,27) (20,14) (28,15) (7,22) (4,21) (6,1) (11,26) (2,21) (6,2) (23,14) (6,21) (27,21) (27,15) (8,26) (7,21)
+  parents [Some(16), Some(14), None, Some(16), Some(6), Some(18), Some(14), Some(17), Some(19), Some(15), Some(13), Some(18), Some(9), Some(15), Some(17), Some(19), Some(2), Some(2), Some(8), Some(3)]
+  length 84 valid true
+case 253 driver 1 alpha 0
+  points (63,21) (54,32) (150,184) (156,192) (34,42) (24,5) (89,188) (79,160) (136,52) (171,152) (120,54) (46,52) (93,53) (137,6) (127,183)
+  nodes (63,21) (54,32) (150,184) (156,192) (34,42) (24,5) (89,188) (79,160) (136,52) (171,152) (120,54) (46,52) (93,53) (137,6) (127,183) (79,53) (46,42) (156,184) (89,183) (120,53)
+  parents [Some(1), None, Some(14), Some(17), Some(16), Some(4), Some(18), Some(15), Some(19), Some(17), Some(19), Some(16), Some(15), Some(8), Some(18), Some(11), Some(1), Some(2), Some(7), Some(12)]
+  length 515 valid true
+case 254 driver 1 alpha 1
+  points (1,0) (3,5) (4,0) (1,4) (3,1) (4,0) (0,1) (3,3) (2,3) (5,2) (0,4) (1,4) (4,0) (4,5) (0,3) (3,2)
+  nodes (1,0) (3,5) (4,0) (1,4) (3,1) (4,0) (0,1) (3,3) (2,3) (5,2) (0,4) (1,4) (4,0) (4,5) (0,3) (3,2) (3,4) (3,0)
+  parents [Some(17), None, Some(5), Some(11), Some(15), Some(12), Some(14), Some(16), Some(7), Some(15), Some(3), Some(16), Some(17), Some(1), Some(10), Some(7), Some(1), Some(4)]
+  length 18 valid true
+case 255 driver 0 alpha 0.6
+  points (3,0) (2,3)
+  nodes (3,0) (2,3)
+  parents [None, Some(0)]
+  length 4 valid true
+case 256 driver 0 alpha 0.3
+  points (6,3) (4,5) (1,3)
+  nodes (6,3) (4,5) (1,3) (4,3)
+  parents [None, Some(3), Some(3), Some(0)]
+  length 7 valid true
+case 257 driver 3 alpha 0
+  points (18,26) (8,7) (6,5) (19,5)
+  nodes (18,26) (8,7) (6,5) (19,5) (18,7)
+  parents [Some(4), Some(4), Some(1), None, Some(3)]
+  length 36 valid true
+case 258 driver 4 alpha 1
+  points (104,85) (45,189) (189,122) (29,18) (25,115)
+  nodes (104,85) (45,189) (189,122) (29,18) (25,115) (104,115) (45,115) (29,115)
+  parents [Some(5), Some(6), Some(5), Some(7), None, Some(6), Some(7), Some(4)]
+  length 372 valid true
+case 259 driver 2 alpha 0.6
+  points (0,1) (1,3) (0,0) (5,2) (3,2) (1,4)
+  nodes (0,1) (1,3) (0,0) (5,2) (3,2) (1,4) (1,2)
+  parents [Some(2), Some(6), None, Some(4), Some(6), Some(1), Some(0)]
+  length 9 valid true
+case 260 driver 0 alpha 0.3
+  points (2,1) (0,0) (1,2) (3,2) (0,3) (2,2) (2,1)
+  nodes (2,1) (0,0) (1,2) (3,2) (0,3) (2,2) (2,1)
+  parents [None, Some(6), Some(5), Some(5), Some(2), Some(6), Some(0)]
+  length 8 valid true
+case 261 driver 2 alpha 0
+  points (7,4) (6,3) (0,3) (4,7) (0,7) (0,7) (1,6) (5,2)
+  nodes (7,4) (6,3) (0,3) (4,7) (0,7) (0,7) (1,6) (5,2) (6,4) (4,6) (0,6)
+  parents [Some(8), Some(8), None, Some(9), Some(10), Some(4), Some(10), Some(1), Some(9), Some(6), Some(2)]
+  length 17 valid true
+case 262 driver 1 alpha 1
+  points (29,23) (20,0) (18,3) (5,23) (5,28) (14,5) (8,21) (6,16) (16,25)
+  nodes (29,23) (20,0) (18,3) (5,23) (5,28) (14,5) (8,21) (6,16) (16,25) (8,16) (16,5) (20,3)
+  parents [Some(11), None, Some(11), Some(6), Some(3), Some(10), Some(9), Some(9), Some(10), Some(5), Some(2), Some(1)]
+  length 94 valid true
+case 263 driver 6 alpha 0.6
+  points (129,174) (185,170) (92,168) (133,73) (81,184) (95,93) (157,173) (197,55) (142,117) (81,153)
+  nodes (129,174) (185,170) (92,168) (133,73) (81,184) (95,93) (157,173) (197,55) (142,117) (81,153) (133,93) (142,173) (81,168) (129,173)
+  parents [Some(13), Some(6), Some(13), Some(10), Some(12), Some(10), None, Some(1), Some(11), Some(12), Some(8), Some(6), Some(2), Some(11)]
+  length 418 valid true
+case 264 driver 6 alpha 0.3
+  points (2,0) (3,0) (0,2) (4,4) (3,1) (2,3) (4,0) (5,3) (3,4) (2,0) (0,3)
+  nodes (2,0) (3,0) (0,2) (4,4) (3,1) (2,3) (4,0) (5,3) (3,4) (2,0) (0,3) (3,3)
+  parents [Some(9), Some(6), Some(10), Some(8), Some(1), Some(11), None, Some(3), Some(11), Some(1), Some(5), Some(4)]
+  length 13 valid true
+case 265 driver 10 alpha 0
+  points (3,0) (2,3) (3,2) (1,0) (3,0) (3,1) (2,1) (3,2) (2,3) (2,0) (0,0) (2,3)
+  nodes (3,0) (2,3) (3,2) (1,0) (3,0) (3,1) (2,1) (3,2) (2,3) (2,0) (0,0) (2,3)
+  parents [Some(9), Some(6), Some(5), Some(10), Some(0), Some(4), Some(5), Some(2), Some(1), Some(3), None, Some(8)]
+  length 8 valid true
+case 266 driver 6 alpha 1
+  points (0,2) (6,4) (4,4) (4,1) (3,2) (0,0) (5,3) (1,0) (5,0) (3,0) (6,3) (5,4) (0,1)
+  nodes (0,2) (6,4) (4,4) (4,1) (3,2) (0,0) (5,3) (1,0) (5,0) (3,0) (6,3) (5,4) (0,1) (4,2) (5,2)
+  parents [Some(4), Some(11), Some(11), Some(13), Some(13), Some(7), None, Some(9), Some(14), Some(8), Some(6), Some(6), Some(0), Some(14), Some(6)]
+  length 19 valid true
+case 267 driver 3 alpha 0.6
+  points (23,12) (17,24) (13,25) (16,16) (17,13) (11,0) (8,2) (8,19) (12,6) (13,24) (10,24) (26,11) (9,14) (7,29)
+  nodes (23,12) (17,24) (13,25) (16,16) (17,13) (11,0) (8,2) (8,19) (12,6) (13,24) (10,24) (26,11) (9,14) (7,29) (9,16) (11,2) (12,16) (17,16)
+  parents [Some(4), Some(17), Some(9), None, Some(17), Some(15), Some(15), Some(14), Some(16), Some(1), Some(9), Some(0), Some(14), Some(7), Some(16), Some(8), Some(3), Some(3)]
+  length 75 valid true
+case 268 driver 8 alpha 0.3
+  points (8,169) (87,92) (87,67) (35,150) (67,24) (36,114) (150,78) (177,175) (174,149) (6,134) (8,0) (149,180) (138,4) (70,160) (10,172)
+  nodes (8,169) (87,92) (87,67) (35,150) (67,24) (36,114) (150,78) (177,175) (174,149) (6,134) (8,0) (149,180) (138,4) (70,160) (10,172) (8,150) (150,149) (138,67) (70,150) (174,175) (36,150)
+  parents [Some(15), Some(2), Some(17), Some(20), Some(2), Some(20), Some(16), Some(19), None, Some(15), Some(4), Some(19), Some(17), Some(18), Some(0), Some(3), Some(8), Some(6), Some(16), Some(8), Some(18)]
+  length 693 valid true
+case 269 driver 4 alpha 0
+  points (3,0) (4,4) (4,1) (5,1) (5,0) (5,0) (5,1) (3,5) (3,2) (2,3) (2,4) (2,5) (4,0) (5,4) (1,0) (2,3)
+  nodes (3,0) (4,4) (4,1) (5,1) (5,0) (5,0) (5,1) (3,5) (3,2) (2,3) (2,4) (2,5) (4,0) (5,4) (1,0) (2,3)
+  parents [Some(12), Some(7), Some(12), Some(5), None, Some(4), Some(3), Some(11), Some(2), Some(8), Some(15), Some(10), Some(5), Some(1), Some(0), Some(9)]
+  length 16 valid true
+case 270 driver 1 alpha 1
+  points (2,0) (1,3)
+  nodes (2,0) (1,3)
+  parents [Some(1), None]
+  length 4 valid true
+case 271 driver 0 alpha 0.6
+  points (1,0) (5,0) (0,4)
+  nodes (1,0) (5,0) (0,4)
+  parents [None, Some(0), Some(0)]
+  length 9 valid true
+case 272 driver 1 alpha 0.3
+  points (20,19) (22,28) (19,1) (24,29)
+  nodes (20,19) (22,28) (19,1) (24,29)
+  parents [Some(1), None, Some(0), Some(1)]
+  length 33 valid true
+case 273 driver 2 alpha 0
+  points (54,186) (141,41) (46,34) (112,155) (17,174)
+  nodes (54,186) (141,41) (46,34) (112,155) (17,174) (112,41) (54,174)
+  parents [Some(6), Some(5), None, Some(5), Some(6), Some(2), Some(3)]
+  length 342 valid true
+case 274 driver 5 alpha 1
+  points (2,0) (4,1) (4,2) (4,0) (5,3) (3,0)
+  nodes (2,0) (4,1) (4,2) (4,0) (5,3) (3,0)
+  parents [Some(5), Some(3), Some(1), Some(5), Some(2), None]
+  length 6 valid true
+case 275 driver 6 alpha 0.6
+  points (1,2) (1,0) (0,3) (1,1) (3,0) (1,3) (3,3)
+  nodes (1,2) (1,0) (0,3) (1,1) (3,0) (1,3) (3,3)
+  parents [Some(5), Some(3), Some(5), Some(0), Some(6), Some(6), None]
+  length 9 valid true
+case 276 driver 1 alpha 0.3
+  points (6,5) (2,3) (3,6) (6,7) (2,0) (0,6) (0,0) (6,5)
+  nodes (6,5) (2,3) (3,6) (6,7) (2,0) (0,6) (0,0) (6,5) (6,6) (2,6)
+  parents [Some(7), None, Some(9), Some(8), Some(1), Some(9), Some(4), Some(8), Some(2), Some(1)]
+  length 16 valid true
+case 277 driver 8 alpha 0
+  points (0,26) (27,28) (27,26) (3,25) (21,7) (21,18) (5,8) (7,15) (9,22)
+  nodes (0,26) (27,28) (27,26) (3,25) (21,7) (21,18) (5,8) (7,15) (9,22) (21,22) (7,22)
+  parents [Some(3), Some(2), Some(9), Some(10), Some(5), Some(9), Some(7), Some(10), None, Some(8), Some(8)]
+  length 68 valid true
+case 278 driver 0 alpha 1
+  points (166,27) (97,35) (27,121) (90,17) (106,106) (151,126) (184,147) (106,16) (165,41) (122,151)
+  nodes (166,27) (97,35) (27,121) (90,17) (106,106) (151,126) (184,147) (106,16) (165,41) (122,151) (151,106) (106,17) (106,27) (166,41)
+  parents [None, Some(12), Some(4), Some(11), Some(10), Some(10), Some(13), Some(11), Some(13), Some(5), Some(8), Some(12), Some(0), Some(0)]
+  length 535 valid true
+case 279 driver 7 alpha 0.6
+  points (3,0) (3,4) (0,1) (2,5) (3,4) (3,5) (1,1) (1,4) (3,3) (2,1) (3,3)
+  nodes (3,0) (3,4) (0,1) (2,5) (3,4) (3,5) (1,1) (1,4) (3,3) (2,1) (3,3) (2,4)
+  parents [Some(9), Some(11), Some(6), Some(11), Some(1), Some(3), Some(7), None, Some(10), Some(6), Some(1), Some(7)]
+  length 12 valid true
+case 280 driver 3 alpha 0.3
+  points (1,3) (3,3) (3,1) (1,2) (2,0) (2,2) (0,1) (2,2) (2,1) (2,1) (1,2) (1,0)
+  nodes (1,3) (3,3) (3,1) (1,2) (2,0) (2,2) (0,1) (2,2) (2,1) (2,1) (1,2) (1,0) (1,2)
+  parents [Some(10), Some(7), Some(9), None, Some(8), Some(12), Some(12), Some(5), Some(9), Some(5), Some(3), Some(4), Some(10)]
+  length 10 valid true
+case 281 driver 11 alpha 0
+  points (5,7) (3,5) (4,1) (0,3) (6,1) (5,7) (0,1) (5,5) (6,6) (1,3) (6,4) (7,7) (6,6)
+  nodes (5,7) (3,5) (4,1) (0,3) (6,1) (5,7) (0,1) (5,5) (6,6) (1,3) (6,4) (7,7) (6,6) (5,6)
+  parents [Some(5), Some(7), Some(4), Some(9), Some(10), Some(11), Some(3), Some(13), Some(12), Some(1), Some(8), None, Some(13), Some(0)]
+  length 21 valid true
+case 282 driver 1 alpha 1
+  points (11,28) (11,0) (13,14) (24,2) (4,17) (7,20) (24,7) (20,10) (10,25) (10,28) (19,9) (1,26) (8,11) (20,7)
+  nodes (11,28) (11,0) (13,14) (24,2) (4,17) (7,20) (24,7) (20,10) (10,25) (10,28) (19,9) (1,26) (8,11) (20,7) (11,25) (19,7) (11,14) (11,11) (19,2) (7,17) (11,2)
+  parents [Some(14), None, Some(16), Some(18), Some(19), Some(19), Some(13), Some(10), Some(14), Some(0), Some(15), Some(8), Some(17), Some(15), Some(16), Some(18), Some(17), Some(20), Some(20), Some(12), Some(1)]
+  length 85 valid true
+case 283 driver 3 alpha 0.6
+  points (109,172) (42,137) (22,135) (166,120) (166,114) (8,115) (42,2) (20,13) (29,80) (181,171) (20,28) (80,168) (58,117) (134,50) (171,9)
+  nodes (109,172) (42,137) (22,135) (166,120) (166,114) (8,115) (42,2) (20,13) (29,80) (181,171) (20,28) (80,168) (58,117) (134,50) (171,9) (166,50) (109,120) (29,115) (42,117) (109,168) (42,135)
+  parents [Some(19), Some(20), Some(20), None, Some(3), Some(17), Some(7), Some(10), Some(17), Some(3), Some(8), Some(19), Some(16), Some(15), Some(15), Some(4), Some(3), Some(18), Some(12), Some(16), Some(18)]
+  length 642 valid true
+case 284 driver 9 alpha 0.3
+  points (1,1) (1,1) (4,5) (4,0) (2,4) (5,0) (1,2) (3,3) (3,5) (2,3) (0,3) (0,2) (0,2) (1,2) (5,3) (3,2)
+  nodes (1,1) (1,1) (4,5) (4,0) (2,4) (5,0) (1,2) (3,3) (3,5) (2,3) (0,3) (0,2) (0,2) (1,2) (5,3) (3,2) (3,3)
+  parents [Some(1), Some(6), Some(8), Some(15), Some(9), Some(3), Some(12), Some(9), Some(16), None, Some(9), Some(12), Some(10), Some(6), Some(16), Some(7), Some(7)]
+  length 17 valid true
+case 285 driver 1 alpha 0
+  points (1,0) (2,1)
+  nodes (1,0) (2,1)
+  parents [Some(1), None]
+  length 2 valid true
+case 286 driver 0 alpha 1
+  points (1,2) (1,0) (4,2)
+  nodes (1,2) (1,0) (4,2)
+  parents [None, Some(0), Some(0)]
+  length 5 valid true
+case 287 driver 0 alpha 0.6
+  points (29,15) (20,25) (29,19) (23,3)
+  nodes (29,15) (20,25) (29,19) (23,3)
+  parents [None, Some(2), Some(0), Some(0)]
+  length 37 valid true
+case 288 driver 1 alpha 0.3
+  points (147,14) (69,85) (94,169) (69,192) (3,60)
+  nodes (147,14) (69,85) (94,169) (69,192) (3,60) (69,60) (69,169)
+  parents [Some(5), None, Some(6), Some(6), Some(5), Some(1), Some(1)]
+  length 347 valid true
+case 289 driver 3 alpha 0
+  points (5,5) (0,1) (1,5) (5,2) (5,5) (5,4)
+  nodes (5,5) (0,1) (1,5) (5,2) (5,5) (5,4)
+  parents [Some(5), Some(2), Some(4), None, Some(0), Some(3)]
+  length 12 valid true
+case 290 driver 3 alpha 1
+  points (0,0) (3,1) (2,2) (3,1) (1,1) (3,1) (1,3)
+  nodes (0,0) (3,1) (2,2) (3,1) (1,1) (3,1) (1,3) (2,1)
+  parents [Some(4), Some(3), Some(7), None, Some(7), Some(3), Some(4), Some(5)]
+  length 7 valid true
+case 291 driver 6 alpha 0.6
+  points (2,0) (1,6) (2,0) (2,7) (7,5) (4,7) (1,1) (5,1)
+  nodes (2,0) (1,6) (2,0) (2,7) (7,5) (4,7) (1,1) (5,1) (2,1)
+  parents [Some(2), Some(6), Some(8), Some(1), Some(7), Some(3), None, Some(8), Some(6)]
+  length 20 valid true
+case 292 driver 0 alpha 0.3
+  points (2,28) (28,27) (9,2) (0,7) (13,8) (23,12) (27,28) (9,0) (3,21)
+  nodes (2,28) (28,27) (9,2) (0,7) (13,8) (23,12) (27,28) (9,0) (3,21) (9,7) (3,7) (3,28)
+  parents [None, Some(6), Some(9), Some(10), Some(9), Some(4), Some(11), Some(2), Some(11), Some(10), Some(8), Some(0)]
+  length 83 valid true
+case 293 driver 3 alpha 0
+  points (10,123) (74,168) (102,75) (57,191) (131,73) (54,65) (196,106) (25,40) (45,135) (127,144)
+  nodes (10,123) (74,168) (102,75) (57,191) (131,73) (54,65) (196,106) (25,40) (45,135) (127,144) (131,106) (74,144) (131,75)
+  parents [Some(8), Some(3), Some(12), None, Some(12), Some(2), Some(10), Some(5), Some(11), Some(11), Some(9), Some(1), Some(10)]
+  length 483 valid true
+case 294 driver 1 alpha 1
+  points (1,4) (3,3) (2,3) (5,1) (3,4) (2,5) (2,3) (2,1) (1,5) (0,1) (4,4)
+  nodes (1,4) (3,3) (2,3) (5,1) (3,4) (2,5) (2,3) (2,1) (1,5) (0,1) (4,4)
+  parents [Some(2), None, Some(6), Some(1), Some(1), Some(6), Some(1), Some(2), Some(5), Some(7), Some(4)]
+  length 16 valid true
+case 295 driver 4 alpha 0.6
+  points (3,3) (1,0) (0,2) (0,0) (0,1) (3,1) (2,2) (0,2) (0,3) (2,0) (0,2) (2,1)
+  nodes (3,3) (1,0) (0,2) (0,0) (0,1) (3,1) (2,2) (0,2) (0,3) (2,0) (0,2) (2,1) (2,1)
+  parents [Some(6), Some(3), Some(4), Some(4), None, Some(11), Some(12), Some(2), Some(10), Some(12), Some(7), Some(4), Some(11)]
+  length 11 valid true
+case 296 driver 4 alpha 0.3
+  points (1,2) (5,7) (1,2) (3,2) (0,4) (7,1) (6,4) (4,4) (1,0) (7,0) (0,7) (0,1) (0,4)
+  nodes (1,2) (5,7) (1,2) (3,2) (0,4) (7,1) (6,4) (4,4) (1,0) (7,0) (0,7) (0,1) (0,4) (5,4) (1,1)
+  parents [Some(2), Some(13), Some(4), Some(2), None, Some(6), Some(13), Some(12), Some(14), Some(5), Some(12), Some(14), Some(4), Some(7), Some(0)]
+  length 25 valid true
+case 297 driver 7 alpha 0
+  points (8,1) (0,4) (10,29) (14,19) (23,20) (24,21) (18,19) (10,0) (28,29) (11,20) (11,20) (2,5) (12,25) (24,6)
+  nodes (8,1) (0,4) (10,29) (14,19) (23,20) (24,21) (18,19) (10,0) (28,29) (11,20) (11,20) (2,5) (12,25) (24,6) (24,20) (11,25) (10,1) (2,4)
+  parents [Some(16), Some(17), Some(15), Some(6), Some(14), Some(14), Some(4), None, Some(5), Some(3), Some(9), Some(17), Some(15), Some(16), Some(13), Some(10), Some(7), Some(0)]
+  length 87 valid true
+case 298 driver 14 alpha 1
+  points (66,38) (7,165) (103,149) (58,112) (97,147) (110,64) (158,192) (181,181) (93,169) (14,118) (171,137) (157,1) (175,194) (144,42) (68,2)
+  nodes (66,38) (7,165) (103,149) (58,112) (97,147) (110,64) (158,192) (181,181) (93,169) (14,118) (171,137) (157,1) (175,194) (144,42) (68,2) (93,147) (93,64) (144,2) (68,38)
+  parents [Some(18), Some(9), Some(4), Some(0), Some(15), Some(16), Some(8), Some(10), Some(15), Some(3), Some(13), Some(17), Some(6), Some(17), None, Some(16), Some(18), Some(14), Some(14)]
+  length 822 valid true
+case 299 driver 13 alpha 0.6
+  points (5,4) (3,3) (3,4) (3,2) (5,1) (2,3) (4,4) (1,1) (5,1) (1,1) (4,4) (1,1) (5,5) (4,1) (5,3) (4,4)
+  nodes (5,4) (3,3) (3,4) (3,2) (5,1) (2,3) (4,4) (1,1) (5,1) (1,1) (4,4) (1,1) (5,5) (4,1) (5,3) (4,4) (4,2)
+  parents [Some(14), Some(3), Some(1), Some(16), Some(13), Some(1), Some(16), Some(9), Some(4), Some(11), Some(6), Some(13), Some(0), None, Some(8), Some(10), Some(13)]
+  length 15 valid true
+case 300 driver 1 alpha 0.3
+  points (0,1) (2,3)
+  nodes (0,1) (2,3)
+  parents [Some(1), None]
+  length 4 valid true
+case 301 driver 2 alpha 0
+  points (2,7) (6,4) (2,3)
+  nodes (2,7) (6,4) (2,3) (2,4)
+  parents [Some(3), Some(3), None, Some(2)]
+  length 8 valid true
+case 302 driver 2 alpha 1
+  points (12,25) (12,4) (16,12) (21,2)
+  nodes (12,25) (12,4) (16,12) (21,2) (16,4)
+  parents [Some(2), Some(4), None, Some(4), Some(2)]
+  length 36 valid true
+case 303 driver 3 alpha 0.6
+  points (3,118) (27,137) (147,179) (173,42) (17,111)
+  nodes (3,118) (27,137) (147,179) (173,42) (17,111) (147,111) (27,111)
+  parents [Some(4), Some(6), Some(5), None, Some(6), Some(3), Some(5)]
+  length 340 valid true
+case 304 driver 4 alpha 0.3
+  points (4,2) (3,3) (0,0) (1,2) (4,5) (0,3)
+  nodes (4,2) (3,3) (0,0) (1,2) (4,5) (0,3) (4,3) (0,2)
+  parents [Some(6), Some(6), Some(7), Some(0), None, Some(7), Some(4), Some(3)]
+  length 11 valid true
+case 305 driver 1 alpha 0
+  points (1,0) (0,3) (1,0) (0,2) (0,3) (3,0) (2,3)
+  nodes (1,0) (0,3) (1,0) (0,2) (0,3) (3,0) (2,3)
+  parents [Some(2), None, Some(3), Some(1), Some(1), Some(2), Some(4)]
+  length 8 valid true
+case 306 driver 3 alpha 1
+  points (4,0) (1,2) (3,2) (7,4) (6,6) (2,4) (3,2) (2,2)
+  nodes (4,0) (1,2) (3,2) (7,4) (6,6) (2,4) (3,2) (2,2) (4,2) (4,4) (6,4)
+  parents [Some(8), Some(7), Some(6), None, Some(10), Some(9), Some(8), Some(2), Some(9), Some(10), Some(3)]
+  length 14 valid true
+case 307 driver 8 alpha 0.6
+  points (14,29) (2,3) (2,14) (8,28) (12,17) (3,28) (19,11) (3,14) (26,9)
+  nodes (14,29) (2,3) (2,14) (8,28) (12,17) (3,28) (19,11) (3,14) (26,9) (12,28) (12,14)
+  parents [Some(9), Some(2), Some(7), Some(9), Some(10), Some(3), Some(8), Some(10), None, Some(4), Some(6)]
+  length 66 valid true
+case 308 driver 6 alpha 0.3
+  points (9,64) (98,109) (56,24) (71,49) (194,155) (127,33) (198,178) (101,28) (150,157) (166,74)
+  nodes (9,64) (98,109) (56,24) (71,49) (194,155) (127,33) (198,178) (101,28) (150,157) (166,74) (71,28) (166,155) (150,155)
+  parents [Some(3), Some(12), Some(10), Some(10), Some(6), Some(9), None, Some(5), Some(12), Some(11), Some(7), Some(4), Some(11)]
+  length 510 valid true
+case 309 driver 7 alpha 0
+  points (5,5) (3,5) (0,0) (4,4) (4,2) (3,0) (3,1) (5,4) (5,5) (4,5) (4,1)
+  nodes (5,5) (3,5) (0,0) (4,4) (4,2) (3,0) (3,1) (5,4) (5,5) (4,5) (4,1)
+  parents [Some(7), Some(9), Some(5), Some(7), Some(3), Some(6), Some(10), None, Some(0), Some(3), Some(4)]
+  length 12 valid true
+case 310 driver 1 alpha 1
+  points (1,2) (0,1) (0,3) (1,0) (0,2) (1,3) (3,3) (2,2) (1,0) (1,3) (3,1) (2,1)
+  nodes (1,2) (0,1) (0,3) (1,0) (0,2) (1,3) (3,3) (2,2) (1,0) (1,3) (3,1) (2,1) (1,1)
+  parents [Some(4), None, Some(4), Some(8), Some(1), Some(2), Some(10), Some(0), Some(12), Some(5), Some(11), Some(12), Some(1)]
+  length 11 valid true
+case 311 driver 6 alpha 0.6
+  points (6,2) (1,1) (5,0) (5,4) (0,1) (2,6) (1,2) (6,5) (5,0) (3,1) (7,1) (2,4) (6,4)
+  nodes (6,2) (1,1) (5,0) (5,4) (0,1) (2,6) (1,2) (6,5) (5,0) (3,1) (7,1) (2,4) (6,4) (2,2)
+  parents [Some(13), Some(6), Some(8), Some(11), Some(1), Some(11), None, Some(12), Some(9), Some(1), Some(0), Some(13), Some(3), Some(6)]
+  length 23 valid true
+case 312 driver 12 alpha 0.3
+  points (15,2) (28,5) (10,28) (26,6) (3,24) (9,29) (24,5) (27,1) (22,22) (18,14) (1,1) (10,5) (17,26) (28,23)
+  nodes (15,2) (28,5) (10,28) (26,6) (3,24) (9,29) (24,5) (27,1) (22,22) (18,14) (1,1) (10,5) (17,26) (28,23) (18,5) (18,22) (10,2) (10,26) (27,5) (26,5)
+  parents [Some(14), Some(18), Some(17), Some(19), Some(17), Some(2), Some(14), Some(18), Some(15), Some(15), Some(16), Some(16), None, Some(8), Some(9), Some(12), Some(0), Some(12), Some(19), Some(6)]
+  length 92 valid true
+case 313 driver 14 alpha 0
+  points (61,199) (117,101) (135,116) (81,172) (113,185) (34,23) (195,43) (119,129) (100,79) (199,145) (61,52) (88,21) (81,149) (86,31) (33,45)
+  nodes (61,199) (117,101) (135,116) (81,172) (113,185) (34,23) (195,43) (119,129) (100,79) (199,145) (61,52) (88,21) (81,149) (86,31) (33,45) (195,116) (86,52) (119,116) (81,185) (34,45)
+  parents [Some(18), Some(8), Some(17), Some(12), Some(18), Some(19), Some(15), Some(17), Some(16), Some(15), Some(19), Some(13), Some(7), Some(16), None, Some(2), Some(10), Some(1), Some(3), Some(14)]
+  length 567 valid true
+case 314 driver 6 alpha 1
+  points (4,1) (5,2) (2,0) (1,3) (2,3) (4,3) (4,5) (5,4) (5,2) (3,0) (2,4) (4,3) (0,5) (5,3) (1,4) (4,3)
+  nodes (4,1) (5,2) (2,0) (1,3) (2,3) (4,3) (4,5) (5,4) (5,2) (3,0) (2,4) (4,3) (0,5) (5,3) (1,4) (4,3) (2,5) (4,4)
+  parents [Some(5), Some(8), Some(9), Some(14), Some(10), Some(11), None, Some(17), Some(13), Some(0), Some(16), Some(15), Some(16), Some(15), Some(10), Some(17), Some(6), Some(6)]
+  length 18 valid true
+case 315 driver 1 alpha 0.6
+  points (1,3) (2,0)
+  nodes (1,3) (2,0)
+  parents [Some(1), None]
+  length 4 valid true
+case 316 driver 2 alpha 0.3
+  points (4,1) (0,1) (4,4)
+  nodes (4,1) (0,1) (4,4)
+  parents [Some(2), Some(0), None]
+  length 7 valid true
+case 317 driver 3 alpha 0
+  points (17,15) (6,7) (21,6) (9,13)
+  nodes (17,15) (6,7) (21,6) (9,13) (17,13)
+  parents [Some(4), Some(3), Some(4), None, Some(3)]
+  length 30 valid true
+case 318 driver 0 alpha 1
+  points (129,18) (155,27) (37,128) (60,42) (118,36)
+  nodes (129,18) (155,27) (37,128) (60,42) (118,36) (129,27)
+  parents [None, Some(5), Some(3), Some(4), Some(5), Some(0)]
+  length 228 valid true
+case 319 driver 4 alpha 0.6
+  points (5,1) (3,5) (4,5) (4,2) (3,5) (1,4)
+  nodes (5,1) (3,5) (4,5) (4,2) (3,5) (1,4)
+  parents [Some(3), Some(4), Some(4), Some(2), None, Some(1)]
+  length 9 valid true
+case 320 driver 5 alpha 0.3
+  points (1,3) (1,0) (2,1) (1,2) (2,2) (3,3) (2,3)
+  nodes (1,3) (1,0) (2,1) (1,2) (2,2) (3,3) (2,3)
+  parents [Some(6), Some(3), Some(4), Some(4), Some(6), None, Some(5)]
+  length 7 valid true
+case 321 driver 0 alpha 0
+  points (4,1) (0,6) (2,5) (4,0) (0,2) (1,5) (6,5) (4,7)
+  nodes (4,1) (0,6) (2,5) (4,0) (0,2) (1,5) (6,5) (4,7) (4,5) (0,5)
+  parents [None, Some(9), Some(5), Some(0), Some(0), Some(9), Some(8), Some(8), Some(2), Some(4)]
+  length 18 valid true
+case 322 driver 7 alpha 1
+  points (9,20) (2,28) (22,4) (10,20) (12,15) (15,24) (19,23) (15,29) (2,18)
+  nodes (9,20) (2,28) (22,4) (10,20) (12,15) (15,24) (19,23) (15,29) (2,18) (12,20) (15,28) (15,23)
+  parents [Some(3), Some(10), Some(6), Some(9), Some(9), Some(10), Some(11), None, Some(0), Some(11), Some(7), Some(5)]
+  length 68 valid true
+case 323 driver 6 alpha 0.6
+  points (165,85) (127,138) (86,7) (82,86) (170,146) (111,100) (134,73) (141,120) (8,29) (97,17)
+  nodes (165,85) (127,138) (86,7) (82,86) (170,146) (111,100) (134,73) (141,120) (8,29) (97,17) (97,73) (134,100) (141,138) (134,85) (97,29)
+  parents [Some(13), Some(12), Some(9), Some(10), Some(12), Some(11), None, Some(11), Some(14), Some(14), Some(6), Some(13), Some(7), Some(6), Some(10)]
+  length 408 valid true
+case 324 driver 3 alpha 0.3
+  points (4,5) (0,4) (5,4) (3,5) (1,2) (1,1) (5,3) (4,0) (0,3) (1,3) (5,3)
+  nodes (4,5) (0,4) (5,4) (3,5) (1,2) (1,1) (5,3) (4,0) (0,3) (1,3) (5,3)
+  parents [Some(3), Some(3), Some(0), None, Some(9), Some(4), Some(10), Some(6), Some(1), Some(8), Some(2)]
+  length 16 valid true
+case 325 driver 10 alpha 0
+  points (3,1) (1,1) (3,2) (0,2) (0,0) (0,0) (3,2) (3,2) (2,3) (0,0) (1,1) (3,2)
+  nodes (3,1) (1,1) (3,2) (0,2) (0,0) (0,0) (3,2) (3,2) (2,3) (0,0) (1,1) (3,2) (0,1)
+  parents [Some(10), Some(10), Some(0), Some(12), Some(5), Some(9), Some(2), Some(6), Some(11), Some(12), None, Some(7), Some(1)]
+  length 8 valid true
+case 326 driver 12 alpha 1
+  points (7,4) (0,0) (2,5) (0,7) (2,4) (4,5) (4,2) (0,2) (0,3) (4,0) (4,0) (7,7) (1,6)
+  nodes (7,4) (0,0) (2,5) (0,7) (2,4) (4,5) (4,2) (0,2) (0,3) (4,0) (4,0) (7,7) (1,6) (4,4) (1,5) (1,7)
+  parents [Some(13), Some(7), Some(14), Some(15), Some(2), Some(2), Some(13), Some(8), Some(14), Some(10), Some(6), Some(15), None, Some(5), Some(12), Some(12)]
+  length 27 valid true
+case 327 driver 6 alpha 0.6
+  points (2,25) (12,21) (24,10) (9,14) (3,20) (12,7) (11,0) (26,26) (3,14) (16,18) (12,1) (27,3) (29,1) (8,19)
+  nodes (2,25) (12,21) (24,10) (9,14) (3,20) (12,7) (11,0) (26,26) (3,14) (16,18) (12,1) (27,3) (29,1) (8,19) (12,18) (12,14) (12,10) (27,1) (8,14)
+  parents [Some(4), Some(14), Some(16), Some(15), Some(13), Some(10), None, Some(9), Some(18), Some(14), Some(6), Some(17), Some(17), Some(18), Some(15), Some(16), Some(5), Some(10), Some(3)]
+  length 101 valid true
+case 328 driver 12 alpha 0.3
+  points (94,142) (145,56) (172,96) (81,124) (155,7) (64,111) (180,186) (37,159) (48,119) (127,126) (45,0) (82,64) (174,119) (144,25) (63,109)
+  nodes (94,142) (145,56) (172,96) (81,124) (155,7) (64,111) (180,186) (37,159) (48,119) (127,126) (45,0) (82,64) (174,119) (144,25) (63,109) (94,126) (81,111) (174,126) (145,25) (81,64) (63,111)
+  parents [Some(15), Some(2), Some(12), Some(15), Some(18), Some(16), Some(17), Some(8), Some(20), Some(17), Some(19), Some(19), None, Some(18), Some(20), Some(9), Some(3), Some(12), Some(1), Some(16), Some(5)]
+  length 591 valid true
+case 329 driver 3 alpha 0
+  points (5,3) (2,5) (3,3) (5,0) (3,5) (5,2) (3,2) (5,3) (1,2) (1,5) (5,0) (2,3) (1,0) (2,5) (0,1) (0,5)
+  nodes (5,3) (2,5) (3,3) (5,0) (3,5) (5,2) (3,2) (5,3) (1,2) (1,5) (5,0) (2,3) (1,0) (2,5) (0,1) (0,5) (1,1)
+  parents [Some(5), Some(13), Some(6), None, Some(2), Some(10), Some(5), Some(0), Some(11), Some(1), Some(3), Some(2), Some(16), Some(4), Some(16), Some(9), Some(8)]
+  length 17 valid true
+case 330 driver 1 alpha 1
+  points (0,3) (1,2)
+  nodes (0,3) (1,2)
+  parents [Some(1), None]
+  length 2 valid true
+case 331 driver 0 alpha 0.6
+  points (1,2) (5,5) (2,5)
+  nodes (1,2) (5,5) (2,5)
+  parents [None, Some(2), Some(0)]
+  length 7 valid true
+case 332 driver 1 alpha 0.3
+  points (13,6) (4,26) (22,10) (15,4)
+  nodes (13,6) (4,26) (22,10) (15,4) (13,10)
+  parents [Some(4), None, Some(4), Some(0), Some(1)]
+  length 42 valid true
+case 333 driver 1 alpha 0
+  points (38,197) (114,181) (197,170) (19,111) (108,144)
+  nodes (38,197) (114,181) (197,170) (19,111) (108,144) (38,181) (114,170)
+  parents [Some(5), None, Some(6), Some(5), Some(6), Some(1), Some(1)]
+  length 307 valid true
+case 334 driver 1 alpha 1
+  points (2,2) (3,1) (5,5) (5,0) (0,1) (4,0)
+  nodes (2,2) (3,1) (5,5) (5,0) (0,1) (4,0) (2,1) (4,1)
+  parents [Some(6), None, Some(7), Some(5), Some(6), Some(7), Some(1), Some(1)]
+  length 12 valid true
+case 335 driver 3 alpha 0.6
+  points (3,2) (3,2) (1,2) (1,2) (2,2) (0,3) (0,1)
+  nodes (3,2) (3,2) (1,2) (1,2) (2,2) (0,3) (0,1) (0,2)
+  parents [Some(4), Some(0), Some(3), None, Some(3), Some(7), Some(7), Some(2)]
+  length 5 valid true
+case 336 driver 6 alpha 0.3
+  points (1,3) (2,5) (1,0) (7,5) (0,7) (0,1) (1,6) (3,4)
+  nodes (1,3) (2,5) (1,0) (7,5) (0,7) (0,1) (1,6) (3,4) (3,5) (1,5) (1,1)
+  parents [Some(9), Some(9), Some(10), Some(8), Some(6), Some(10), None, Some(8), Some(1), Some(6), Some(0)]
+  length 16 valid true
+case 337 driver 4 alpha 0
+  points (29,10) (22,29) (16,1) (0,2) (10,23) (19,18) (19,22) (12,14) (1,16)
+  nodes (29,10) (22,29) (16,1) (0,2) (10,23) (19,18) (19,22) (12,14) (1,16) (19,14) (1,14) (19,23) (1,2)
+  parents [Some(9), Some(11), Some(12), Some(12), None, Some(6), Some(11), Some(9), Some(10), Some(5), Some(7), Some(4), Some(10)]
+  length 90 valid true
+case 338 driver 2 alpha 1
+  points (7,188) (58,99) (18,36) (62,143) (69,59) (63,177) (71,118) (48,120) (79,52) (58,132)
+  nodes (7,188) (58,99) (18,36) (62,143) (69,59) (63,177) (71,118) (48,120) (79,52) (58,132) (48,99) (69,52) (18,99) (18,52)
+  parents [Some(12), Some(10), None, Some(9), Some(11), Some(3), Some(1), Some(10), Some(11), Some(7), Some(12), Some(13), Some(13), Some(2)]
+  length 396 valid true
+case 339 driver 1 alpha 0.6
+  points (5,2) (5,2) (0,1) (0,4) (5,4) (4,1) (1,5) (0,1) (4,0) (3,3) (3,4)
+  nodes (5,2) (5,2) (0,1) (0,4) (5,4) (4,1) (1,5) (0,1) (4,0) (3,3) (3,4) (1,4) (4,2)
+  parents [Some(1), None, Some(7), Some(11), Some(1), Some(12), Some(11), Some(5), Some(5), Some(12), Some(9), Some(10), Some(0)]
+  length 16 valid true
+case 340 driver 0 alpha 0.3
+  points (0,3) (2,0) (1,3) (1,0) (1,3) (0,3) (2,3) (2,1) (2,2) (2,2) (0,3) (0,0)
+  nodes (0,3) (2,0) (1,3) (1,0) (1,3) (0,3) (2,3) (2,1) (2,2) (2,2) (0,3) (0,0)
+  parents [None, Some(7), Some(10), Some(1), Some(2), Some(0), Some(4), Some(8), Some(9), Some(6), Some(5), Some(3)]
+  length 7 valid true
+case 341 driver 11 alpha 0
+  points (4,5) (7,6) (6,0) (2,4) (4,7) (5,5) (6,3) (4,0) (0,0) (6,1) (1,4) (1,7) (3,1)
+  nodes (4,5) (7,6) (6,0) (2,4) (4,7) (5,5) (6,3) (4,0) (0,0) (6,1) (1,4) (1,7) (3,1) (6,5) (3,0)
+  parents [Some(4), Some(13), Some(9), Some(0), Some(11), Some(0), Some(13), Some(2), Some(14), Some(6), Some(3), None, Some(14), Some(5), Some(7)]
+  length 25 valid true
+case 342 driver 8 alpha 1
+  points (12,0) (13,6) (7,26) (2,13) (5,4) (2,7) (15,17) (13,3) (12,26) (10,1) (27,2) (25,0) (24,12) (8,17)
+  nodes (12,0) (13,6) (7,26) (2,13) (5,4) (2,7) (15,17) (13,3) (12,26) (10,1) (27,2) (25,0) (24,12) (8,17) (12,1) (12,6) (12,17) (5,13) (12,17)
+  parents [Some(14), Some(15), Some(8), Some(17), Some(17), Some(3), Some(16), Some(1), None, Some(14), Some(12), Some(0), Some(6), Some(16), Some(15), Some(18), Some(18), Some(13), Some(8)]
+  length 109 valid true
+case 343 driver 6 alpha 0.6
+  points (40,62) (161,122) (97,100) (48,185) (27,34) (81,6) (28,179) (51,86) (115,9) (93,156) (42,150) (78,167) (37,47) (63,126) (80,180)
+  nodes (40,62) (161,122) (97,100) (48,185) (27,34) (81,6) (28,179) (51,86) (115,9) (93,156) (42,150) (78,167) (37,47) (63,126) (80,180) (97,122) (51,126) (51,62) (42,179) (48,180) (81,9) (80,167)
+  parents [Some(17), Some(15), Some(15), Some(19), Some(12), Some(20), None, Some(16), Some(20), Some(21), Some(18), Some(21), Some(0), Some(16), Some(19), Some(13), Some(10), Some(7), Some(6), Some(18), Some(17), Some(14)]
+  length 531 valid true
+case 344 driver 14 alpha 0.3
+  points (0,5) (3,2) (2,3) (0,2) (0,5) (3,2) (2,1) (1,4) (5,1) (1,5) (2,4) (4,5) (4,0) (2,3) (5,2) (3,1)
+  nodes (0,5) (3,2) (2,3) (0,2) (0,5) (3,2) (2,1) (1,4) (5,1) (1,5) (2,4) (4,5) (4,0) (2,3) (5,2) (3,1) (4,2) (2,2)
+  parents [Some(4), Some(5), Some(17), Some(17), Some(9), Some(16), Some(15), Some(10), Some(14), Some(7), Some(13), Some(16), Some(8), Some(2), None, Some(1), Some(14), Some(1)]
+  length 18 valid true
+case 345 driver 0 alpha 0
+  points (2,1) (1,3)
+  nodes (2,1) (1,3)
+  parents [None, Some(0)]
+  length 3 valid true
+case 346 driver 0 alpha 1
+  points (4,7) (3,4) (1,1)
+  nodes (4,7) (3,4) (1,1)
+  parents [None, Some(0), Some(1)]
+  length 9 valid true
+case 347 driver 3 alpha 0.6
+  points (10,20) (15,28) (2,6) (28,24)
+  nodes (10,20) (15,28) (2,6) (28,24) (15,24)
+  parents [Some(4), Some(4), Some(0), None, Some(3)]
+  length 48 valid true
+case 348 driver 2 alpha 0.3
+  points (141,66) (85,43) (35,176) (73,134) (170,84)
+  nodes (141,66) (85,43) (35,176) (73,134) (170,84) (85,66)
+  parents [Some(5), Some(5), None, Some(2), Some(0), Some(3)]
+  length 286 valid true
+case 349 driver 1 alpha 0
+  points (5,0) (5,0) (5,0) (3,5) (0,0) (5,2)
+  nodes (5,0) (5,0) (5,0) (3,5) (0,0) (5,2)
+  parents [Some(1), None, Some(1), Some(5), Some(2), Some(2)]
+  length 12 valid true
+case 350 driver 1 alpha 1
+  points (2,0) (3,0) (3,2) (3,0) (3,1) (1,0) (3,0)
+  nodes (2,0) (3,0) (3,2) (3,0) (3,1) (1,0) (3,0)
+  parents [Some(6), None, Some(4), Some(1), Some(6), Some(0), Some(3)]
+  length 4 valid true
+case 351 driver 5 alpha 0.6
+  points (0,2) (7,5) (1,3) (5,1) (0,4) (7,0) (6,6) (2,0)
+  nodes (0,2) (7,5) (1,3) (5,1) (0,4) (7,0) (6,6) (2,0) (1,2) (5,0)
+  parents [Some(8), Some(5), Some(8), Some(9), Some(2), None, Some(1), Some(9), Some(7), Some(5)]
+  length 20 valid true
+case 352 driver 2 alpha 0.3
+  points (24,16) (17,26) (24,26) (3,5) (1,5) (27,20) (19,20) (3,29) (17,13)
+  nodes (24,16) (17,26) (24,26) (3,5) (1,5) (27,20) (19,20) (3,29) (17,13) (24,20) (19,26)
+  parents [Some(9), Some(10), None, Some(8), Some(3), Some(9), Some(10), Some(1), Some(6), Some(2), Some(2)]
+  length 76 valid true
+case 353 driver 1 alpha 0
+  points (164,6) (99,51) (54,103) (17,38) (13,167) (98,48) (186,158) (98,199) (148,123) (29,160)
+  nodes (164,6) (99,51) (54,103) (17,38) (13,167) (98,48) (186,158) (98,199) (148,123) (29,160) (99,103) (54,160) (98,38)
+  parents [Some(12), None, Some(10), Some(12), Some(9), Some(1), Some(8), Some(11), Some(10), Some(11), Some(1), Some(2), Some(5)]
+  length 620 valid true
+case 354 driver 7 alpha 1
+  points (5,3) (0,2) (0,5) (1,0) (3,2) (1,0) (2,0) (4,2) (5,1) (5,0) (0,0)
+  nodes (5,3) (0,2) (0,5) (1,0) (3,2) (1,0) (2,0) (4,2) (5,1) (5,0) (0,0) (5,2) (2,2)
+  parents [Some(11), Some(12), Some(1), Some(5), Some(7), Some(6), Some(12), None, Some(11), Some(8), Some(3), Some(7), Some(4)]
+  length 15 valid true
+case 355 driver 4 alpha 0.6
+  points (2,2) (2,1) (0,2) (0,1) (3,0) (0,2) (2,2) (0,0) (1,2) (0,3) (3,0) (1,0)
+  nodes (2,2) (2,1) (0,2) (0,1) (3,0) (0,2) (2,2) (0,0) (1,2) (0,3) (3,0) (1,0) (2,0)
+  parents [Some(1), Some(12), Some(3), Some(7), None, Some(2), Some(0), Some(11), Some(6), Some(5), Some(4), Some(12), Some(10)]
+  length 9 valid true
+case 356 driver 5 alpha 0.3
+  points (2,6) (3,6) (7,4) (6,7) (2,1) (2,4) (3,1) (4,2) (7,2) (2,2) (4,0) (0,3) (6,2)
+  nodes (2,6) (3,6) (7,4) (6,7) (2,1) (2,4) (3,1) (4,2) (7,2) (2,2) (4,0) (0,3) (6,2) (2,3)
+  parents [Some(5), Some(0), Some(8), Some(1), Some(9), None, Some(4), Some(9), Some(12), Some(13), Some(7), Some(13), Some(7), Some(5)]
+  length 22 valid true
+case 357 driver 2 alpha 0
+  points (6,24) (21,21) (29,9) (7,4) (28,8) (9,3) (5,5) (1,4) (19,24) (14,24) (17,23) (2,22) (13,6) (20,14)
+  nodes (6,24) (21,21) (29,9) (7,4) (28,8) (9,3) (5,5) (1,4) (19,24) (14,24) (17,23) (2,22) (13,6) (20,14) (20,8) (20,21) (19,23) (9,4) (5,4)
+  parents [Some(9), Some(15), None, Some(17), Some(2), Some(17), Some(18), Some(18), Some(16), Some(10), Some(16), Some(0), Some(14), Some(14), Some(4), Some(13), Some(15), Some(12), Some(3)]
+  length 73 valid true
+case 358 driver 14 alpha 1
+  points (36,15) (24,168) (24,95) (24,126) (49,120) (89,126) (110,135) (47,124) (196,163) (102,16) (126,4) (1,187) (139,141) (76,191) (141,181)
+  nodes (36,15) (24,168) (24,95) (24,126) (49,120) (89,126) (110,135) (47,124) (196,163) (102,16) (126,4) (1,187) (139,141) (76,191) (141,181) (24,181) (76,181) (49,124) (126,135) (141,163) (102,126)
+  parents [Some(9), Some(15), Some(3), Some(1), Some(17), Some(20), Some(18), Some(17), Some(19), Some(20), Some(18), Some(15), Some(19), Some(16), None, Some(16), Some(14), Some(5), Some(12), Some(14), Some(6)]
+  length 760 valid true
+case 359 driver 6 alpha 0.6
+  points (1,4) (5,1) (1,2) (2,0) (3,1) (2,2) (0,2) (0,3) (5,1) (5,5) (2,0) (0,4) (3,5) (5,2) (0,3) (1,3)
+  nodes (1,4) (5,1) (1,2) (2,0) (3,1) (2,2) (0,2) (0,3) (5,1) (5,5) (2,0) (0,4) (3,5) (5,2) (0,3) (1,3) (2,1)
+  parents [Some(15), Some(8), Some(6), Some(10), Some(16), Some(2), None, Some(6), Some(13), Some(12), Some(16), Some(14), Some(0), Some(5), Some(7), Some(14), Some(5)]
+  length 18 valid true
+case 360 driver 1 alpha 0.3
+  points (1,2) (2,3)
+  nodes (1,2) (2,3)
+  parents [Some(1), None]
+  length 2 valid true
+case 361 driver 0 alpha 0
+  points (3,6) (7,1) (4,2)
+  nodes (3,6) (7,1) (4,2)
+  parents [None, Some(2), Some(0)]
+  length 9 valid true
+case 362 driver 3 alpha 1
+  points (7,16) (16,6) (0,0) (0,16)
+  nodes (7,16) (16,6) (0,0) (0,16)
+  parents [Some(3), Some(0), Some(3), None]
+  length 42 valid true
+case 363 driver 4 alpha 0.6
+  points (183,81) (24,113) (29,119) (87,139) (146,190)
+  nodes (183,81) (24,113) (29,119) (87,139) (146,190) (146,139)
+  parents [Some(5), Some(2), Some(3), Some(5), None, Some(4)]
+  length 294 valid true
+case 364 driver 1 alpha 0.3
+  points (2,3) (5,3) (5,1) (2,4) (3,4) (2,2)
+  nodes (2,3) (5,3) (5,1) (2,4) (3,4) (2,2)
+  parents [Some(1), None, Some(1), Some(0), Some(3), Some(0)]
+  length 8 valid true
+case 365 driver 0 alpha 0
+  points (2,2) (3,3) (3,3) (0,2) (0,1) (0,2) (1,2)
+  nodes (2,2) (3,3) (3,3) (0,2) (0,1) (0,2) (1,2)
+  parents [None, Some(0), Some(1), Some(5), Some(3), Some(6), Some(0)]
+  length 5 valid true
+case 366 driver 1 alpha 1
+  points (2,7) (2,5) (2,5) (7,6) (5,1) (2,0) (3,0) (4,0)
+  nodes (2,7) (2,5) (2,5) (7,6) (5,1) (2,0) (3,0) (4,0) (2,1) (2,6)
+  parents [Some(9), None, Some(1), Some(9), Some(8), Some(8), Some(5), Some(6), Some(1), Some(2)]
+  length 17 valid true
+case 367 driver 4 alpha 0.6
+  points (25,25) (18,22) (3,8) (0,23) (24,21) (25,15) (18,12) (25,23) (18,12)
+  nodes (25,25) (18,22) (3,8) (0,23) (24,21) (25,15) (18,12) (25,23) (18,12) (24,22) (24,15)
+  parents [Some(7), Some(9), Some(6), Some(1), None, Some(10), Some(8), Some(9), Some(10), Some(4), Some(4)]
+  length 65 valid true
+case 368 driver 3 alpha 0.3
+  points (156,177) (36,196) (114,180) (127,124) (130,169) (165,133) (12,136) (106,156) (98,11) (92,144)
+  nodes (156,177) (36,196) (114,180) (127,124) (130,169) (165,133) (12,136) (106,156) (98,11) (92,144) (127,156) (127,133) (130,177)
+  parents [Some(12), Some(2), Some(12), None, Some(10), Some(11), Some(9), Some(10), Some(3), Some(7), Some(11), Some(3), Some(4)]
+  length 510 valid true
+case 369 driver 10 alpha 0
+  points (5,2) (0,4) (2,0) (5,2) (0,5) (0,4) (5,0) (0,3) (4,5) (0,3) (4,4)
+  nodes (5,2) (0,4) (2,0) (5,2) (0,5) (0,4) (5,0) (0,3) (4,5) (0,3) (4,4)
+  parents [Some(3), Some(5), Some(6), Some(10), Some(8), Some(4), Some(0), Some(9), Some(10), Some(1), None]
+  length 15 valid true
+case 370 driver 8 alpha 1
+  points (0,0) (0,3) (3,3) (1,2) (2,0) (0,1) (2,1) (0,1) (3,0) (2,2) (3,0) (0,3)
+  nodes (0,0) (0,3) (3,3) (1,2) (2,0) (0,1) (2,1) (0,1) (3,0) (2,2) (3,0) (0,3)
+  parents [Some(4), Some(11), Some(10), Some(9), Some(10), Some(0), Some(4), Some(5), None, Some(6), Some(8), Some(2)]
+  length 13 valid true
+case 371 driver 5 alpha 0.6
+  points (4,7) (2,5) (7,7) (4,0) (2,0) (6,2) (0,7) (3,1) (7,5) (1,1) (1,5) (3,6) (0,5)
+  nodes (4,7) (2,5) (7,7) (4,0) (2,0) (6,2) (0,7) (3,1) (7,5) (1,1) (1,5) (3,6) (0,5) (4,1) (6,5) (3,5) (2,1)
+  parents [Some(2), Some(15), Some(8), Some(13), Some(16), None, Some(12), Some(13), Some(14), Some(16), Some(1), Some(15), Some(10), Some(5), Some(5), Some(14), Some(7)]
+  length 26 valid true
+case 372 driver 13 alpha 0.3
+  points (22,18) (13,21) (11,25) (0,10) (20,10) (14,22) (26,13) (13,6) (6,3) (22,12) (25,14) (18,7) (18,13) (28,2)
+  nodes (22,18) (13,21) (11,25) (0,10) (20,10) (14,22) (26,13) (13,6) (6,3) (22,12) (25,14) (18,7) (18,13) (28,2) (6,6) (20,12) (26,12) (14,21)
+  parents [Some(9), Some(17), Some(1), Some(14), Some(15), Some(17), Some(16), Some(11), Some(14), Some(16), Some(6), Some(4), Some(15), None, Some(7), Some(9), Some(13), Some(0)]
+  length 82 valid true
+case 373 driver 1 alpha 0
+  points (87,113) (78,90) (38,1) (76,135) (118,36) (53,144) (181,61) (146,192) (111,82) (190,27) (31,114) (88,128) (171,41) (37,44) (191,18)
+  nodes (87,113) (78,90) (38,1) (76,135) (118,36) (53,144) (181,61) (146,192) (111,82) (190,27) (31,114) (88,128) (171,41) (37,44) (191,18) (181,41) (87,90) (53,135) (88,135) (37,114) (118,41)
+  parents [Some(16), None, Some(13), Some(18), Some(20), Some(17), Some(15), Some(18), Some(16), Some(15), Some(19), Some(0), Some(20), Some(19), Some(9), Some(12), Some(1), Some(3), Some(11), Some(17), Some(8)]
+  length 572 valid true
+case 374 driver 1 alpha 1
+  points (1,3) (3,4) (5,3) (3,1) (4,4) (3,2) (3,1) (0,2) (0,4) (0,5) (4,4) (4,4) (5,1) (3,5) (1,0) (5,4)
+  nodes (1,3) (3,4) (5,3) (3,1) (4,4) (3,2) (3,1) (0,2) (0,4) (0,5) (4,4) (4,4) (5,1) (3,5) (1,0) (5,4) (1,4) (3,4)
+  parents [Some(16), None, Some(15), Some(6), Some(1), Some(17), Some(5), Some(8), Some(16), Some(8), Some(4), Some(10), Some(2), Some(1), Some(3), Some(11), Some(17), Some(1)]
+  length 19 valid true
+case 375 driver 1 alpha 0.6
+  points (1,1) (0,3)
+  nodes (1,1) (0,3)
+  parents [Some(1), None]
+  length 3 valid true
+case 376 driver 0 alpha 0.3
+  points (3,7) (1,5) (0,7)
+  nodes (3,7) (1,5) (0,7) (1,7)
+  parents [None, Some(3), Some(3), Some(0)]
+  length 5 valid true
+case 377 driver 1 alpha 0
+  points (13,7) (12,3) (10,23) (6,3)
+  nodes (13,7) (12,3) (10,23) (6,3) (12,7)
+  parents [Some(4), None, Some(4), Some(1), Some(1)]
+  length 29 valid true
+case 378 driver 2 alpha 1
+  points (115,30) (147,123) (99,159) (107,35) (96,93)
+  nodes (115,30) (147,123) (99,159) (107,35) (96,93) (99,93) (99,123)
+  parents [Some(3), Some(6), None, Some(5), Some(5), Some(6), Some(2)]
+  length 196 valid true
+case 379 driver 4 alpha 0.6
+  points (3,5) (4,5) (3,4) (1,0) (1,2) (0,4)
+  nodes (3,5) (4,5) (3,4) (1,0) (1,2) (0,4) (1,4)
+  parents [Some(2), Some(0), Some(6), Some(4), None, Some(6), Some(4)]
+  length 9 valid true
+case 380 driver 4 alpha 0.3
+  points (2,0) (0,1) (3,3) (1,2) (3,1) (3,3) (3,3)
+  nodes (2,0) (0,1) (3,3) (1,2) (3,1) (3,3) (3,3) (2,1) (1,1)
+  parents [Some(7), Some(8), Some(4), Some(8), None, Some(2), Some(5), Some(4), Some(7)]
+  length 7 valid true
+case 381 driver 1 alpha 0
+  points (7,0) (6,4) (2,3) (7,1) (6,5) (5,3) (5,2) (3,4)
+  nodes (7,0) (6,4) (2,3) (7,1) (6,5) (5,3) (5,2) (3,4) (3,3)
+  parents [Some(3), None, Some(8), Some(6), Some(1), Some(1), Some(5), Some(8), Some(5)]
+  length 12 valid true
+case 382 driver 7 alpha 1
+  points (8,13) (13,8) (14,2) (23,19) (4,8) (26,9) (3,2) (3,6) (29,7)
+  nodes (8,13) (13,8) (14,2) (23,19) (4,8) (26,9) (3,2) (3,6) (29,7) (23,9) (8,8) (4,7)
+  parents [Some(10), Some(10), Some(6), Some(9), Some(11), Some(9), Some(7), None, Some(11), Some(1), Some(4), Some(7)]
+  length 81 valid true
+case 383 driver 5 alpha 0.6
+  points (13,52) (99,30) (53,135) (133,107) (156,145) (97,105) (66,137) (138,32) (45,185) (29,66)
+  nodes (13,52) (99,30) (53,135) (133,107) (156,145) (97,105) (66,137) (138,32) (45,185) (29,66) (97,66) (99,32) (97,107) (66,135)
+  parents [Some(9), Some(11), Some(13), Some(12), Some(3), None, Some(13), Some(11), Some(2), Some(10), Some(5), Some(10), Some(5), Some(12)]
+  length 445 valid true
+case 384 driver 10 alpha 0.3
+  points (0,3) (2,0) (1,1) (3,2) (5,3) (1,5) (1,2) (5,3) (1,5) (1,0) (3,5)
+  nodes (0,3) (2,0) (1,1) (3,2) (5,3) (1,5) (1,2) (5,3) (1,5) (1,0) (3,5) (3,3)
+  parents [Some(6), Some(9), Some(6), Some(11), Some(11), Some(8), Some(3), Some(4), Some(10), Some(2), None, Some(10)]
+  length 14 valid true
+case 385 driver 3 alpha 0
+  points (2,1) (2,3) (1,1) (0,2) (0,2) (1,0) (1,2) (3,3) (0,0) (0,3) (3,3) (2,2)
+  nodes (2,1) (2,3) (1,1) (0,2) (0,2) (1,0) (1,2) (3,3) (0,0) (0,3) (3,3) (2,2)
+  parents [Some(2), Some(11), Some(6), None, Some(3), Some(2), Some(4), Some(1), Some(5), Some(4), Some(7), Some(0)]
+  length 9 valid true
+case 386 driver 12 alpha 1
+  points (2,3) (0,5) (5,1) (4,0) (1,2) (0,2) (3,5) (3,1) (1,6) (4,6) (4,0) (6,3) (2,2)
+  nodes (2,3) (0,5) (5,1) (4,0) (1,2) (0,2) (3,5) (3,1) (1,6) (4,6) (4,0) (6,3) (2,2) (4,1) (3,3)
+  parents [Some(12), Some(5), Some(13), Some(10), Some(12), Some(4), Some(14), Some(12), Some(4), Some(6), Some(13), Some(14), None, Some(7), Some(0)]
+  length 23 valid true
+case 387 driver 11 alpha 0.6
+  points (1,20) (6,5) (8,26) (26,27) (20,9) (18,18) (15,13) (22,0) (3,18) (11,8) (20,15) (24,15) (11,3) (13,6)
+  nodes (1,20) (6,5) (8,26) (26,27) (20,9) (18,18) (15,13) (22,0) (3,18) (11,8) (20,15) (24,15) (11,3) (13,6) (8,18) (13,8) (11,5) (18,15)
+  parents [Some(8), Some(16), Some(14), Some(11), Some(10), Some(17), Some(17), Some(4), Some(14), Some(15), Some(11), None, Some(16), Some(15), Some(5), Some(6), Some(13), Some(10)]
+  length 93 valid true
+case 388 driver 12 alpha 0.3
+  points (14,111) (125,60) (88,14) (162,119) (197,117) (132,116) (99,81) (58,154) (185,107) (24,62) (81,166) (163,51) (69,107) (107,69) (191,45)
+  nodes (14,111) (125,60) (88,14) (162,119) (197,117) (132,116) (99,81) (58,154) (185,107) (24,62) (81,166) (163,51) (69,107) (107,69) (191,45) (99,107) (58,111) (99,69) (185,117) (24,111) (162,117)
+  parents [Some(19), Some(13), Some(17), Some(20), Some(18), Some(15), Some(15), Some(16), Some(18), Some(19), Some(7), Some(1), None, Some(17), Some(11), Some(12), Some(12), Some(6), Some(20), Some(16), Some(5)]
+  length 556 valid true
+case 389 driver 5 alpha 0
+  points (2,0) (3,3) (0,1) (1,0) (0,4) (0,5) (0,4) (2,3) (5,2) (4,3) (2,0) (4,5) (4,5) (0,0) (5,0) (2,5)
+  nodes (2,0) (3,3) (0,1) (1,0) (0,4) (0,5) (0,4) (2,3) (5,2) (4,3) (2,0) (4,5) (4,5) (0,0) (5,0) (2,5)
+  parents [Some(3), Some(7), Some(4), Some(13), Some(6), None, Some(5), Some(15), Some(9), Some(1), Some(0), Some(9), Some(11), Some(2), Some(8), Some(5)]
+  length 19 valid true
+case 390 driver 0 alpha 1
+  points (0,1) (1,0)
+  nodes (0,1) (1,0)
+  parents [None, Some(0)]
+  length 2 valid true
+case 391 driver 2 alpha 0.6
+  points (4,0) (3,5) (4,3)
+  nodes (4,0) (3,5) (4,3)
+  parents [Some(2), Some(2), None]
+  length 6 valid true
+case 392 driver 2 alpha 0.3
+  points (16,18) (0,23) (12,13) (6,13)
+  nodes (16,18) (0,23) (12,13) (6,13)
+  parents [Some(2), Some(3), None, Some(2)]
+  length 31 valid true
+case 393 driver 2 alpha 0
+  points (20,191) (133,11) (35,130) (70,10) (119,46)
+  nodes (20,191) (133,11) (35,130) (70,10) (119,46) (119,11) (70,11)
+  parents [Some(2), Some(5), None, Some(6), Some(5), Some(6), Some(2)]
+  length 329 valid true
+case 394 driver 2 alpha 1
+  points (0,3) (2,1) (1,3) (1,0) (3,1) (3,5)
+  nodes (0,3) (2,1) (1,3) (1,0) (3,1) (3,5) (1,1)
+  parents [Some(2), Some(6), None, Some(6), Some(1), Some(2), Some(2)]
+  length 10 valid true
+case 395 driver 6 alpha 0.6
+  points (0,3) (0,1) (1,1) (1,3) (3,3) (2,1) (2,0)
+  nodes (0,3) (0,1) (1,1) (1,3) (3,3) (2,1) (2,0)
+  parents [Some(3), Some(2), Some(5), Some(2), Some(5), Some(6), None]
+  length 9 valid true
+case 396 driver 0 alpha 0.3
+  points (2,3) (6,6) (4,0) (1,7) (0,6) (4,1) (4,0) (5,1)
+  nodes (2,3) (6,6) (4,0) (1,7) (0,6) (4,1) (4,0) (5,1) (2,6) (1,6)
+  parents [None, Some(8), Some(6), Some(9), Some(9), Some(0), Some(5), Some(5), Some(0), Some(8)]
+  length 16 valid true
+case 397 driver 1 alpha 0
+  points (27,16) (19,14) (22,27) (9,14) (21,8) (23,21) (17,28) (19,10) (8,16)
+  nodes (27,16) (19,14) (22,27) (9,14) (21,8) (23,21) (17,28) (19,10) (8,16) (23,16)
+  parents [Some(9), None, Some(5), Some(1), Some(7), Some(9), Some(2), Some(1), Some(3), Some(1)]
+  length 49 valid true
+case 398 driver 8 alpha 1
+  points (86,126) (111,128) (26,15) (140,111) (168,170) (173,140) (159,48) (1,99) (31,174) (151,108)
+  nodes (86,126) (111,128) (26,15) (140,111) (168,170) (173,140) (159,48) (1,99) (31,174) (151,108) (86,128) (26,99) (86,170) (31,170)
+  parents [Some(10), Some(10), Some(11), Some(1), Some(12), Some(4), Some(9), Some(11), None, Some(3), Some(12), Some(13), Some(13), Some(8)]
+  length 558 valid true
+case 399 driver 9 alpha 0.6
+  points (2,2) (3,4) (0,3) (1,1) (0,2) (0,0) (3,0) (5,4) (4,3) (2,5) (4,5)
+  nodes (2,2) (3,4) (0,3) (1,1) (0,2) (0,0) (3,0) (5,4) (4,3) (2,5) (4,5) (4,4) (3,5) (1,2)
+  parents [Some(9), Some(12), Some(4), Some(13), Some(13), Some(4), Some(0), Some(11), Some(11), None, Some(12), Some(10), Some(9), Some(0)]
+  length 18 valid true
