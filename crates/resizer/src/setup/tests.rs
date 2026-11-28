@@ -1,6 +1,7 @@
 use super::*;
 use crate::testing::{
-    DefSections, cells, clock_cells_source, def_text, design, pin, with_wired_session,
+    DefSections, cells, cells_with, clock_cells_source, def_text, design, design_with_copies, pin,
+    with_wired_session,
 };
 use pare_common::db::indices::CellId;
 use pare_common::db::liberty::ArcSetId;
@@ -703,5 +704,87 @@ fn the_legacy_phase_leaves_the_total_slack_to_its_rate_checks() {
 
         assert!(repair.tns() > start);
         assert_eq!(phase.prev_tns, start);
+    });
+}
+
+/// A buffer `name` of `delay` nanoseconds whatever its load or input, and
+/// a slew of `slew` nanoseconds at 100 fF, which sets its drive resistance.
+fn flat_buffer(name: &str, slew: f64, delay: f64) -> String {
+    format!(
+        "cell ({name}) {{ area : 0.8 ;
+           pin (A) {{ direction : input ; capacitance : 0.97 ; }}
+           pin (Z) {{ direction : output ; function : \"A\" ; max_capacitance : 60.0 ;
+             timing () {{ related_pin : \"A\" ; timing_sense : positive_unate ;
+               cell_rise (delay_t) {{ values (\"{delay}, {delay}\", \"{delay}, {delay}\") ; }}
+               cell_fall (delay_t) {{ values (\"{delay}, {delay}\", \"{delay}, {delay}\") ; }}
+               rise_transition (delay_t) {{ values (\"0.001, {slew}\", \"0.001, {slew}\") ; }}
+               fall_transition (delay_t) {{ values (\"0.001, {slew}\", \"0.001, {slew}\") ; }} }} }} }}\n"
+    )
+}
+
+/// A flop launching through a slow, strong buffer `s1` and then a weak,
+/// quick one `b1` into another flop.
+fn slow_strong_then_weak() -> pare_common::db::design::NetlistDB {
+    let components = "- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+        - s1 STRONG + PLACED ( 82000 2800 ) N ;\n\
+        - b1 BUF_X1 + PLACED ( 162000 2800 ) N ;\n\
+        - f2 DFF_X1 + PLACED ( 242000 2800 ) N ;\n";
+    let nets = "- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n\
+        - n0 ( f1 Q ) ( s1 A ) ;\n- n1 ( s1 Z ) ( b1 A ) ;\n- n2 ( b1 Z ) ( f2 D ) ;\n";
+    design_with_copies(
+        &def_text(
+            "slow",
+            &DefSections {
+                components,
+                nets,
+                inputs: &["clk"],
+                outputs: &[],
+            },
+        ),
+        &[("BUF_X1", "STRONG"), ("BUF_X1", "FAST")],
+    )
+}
+
+#[test]
+fn the_last_gasp_undoes_a_pass_that_makes_the_worst_slack_worse_and_goes_no_further() {
+    let mut db = slow_strong_then_weak();
+    let lib = cells_with(&format!(
+        "{}{}",
+        flat_buffer("STRONG", 0.002, 0.2),
+        flat_buffer("FAST", 0.0005, 0.005)
+    ));
+    let end = pin(&db, "f2/D");
+
+    with_repair_over(&mut db, &lib, 0.3, SetupOptions::default(), |repair| {
+        let start = repair.tns();
+        let (mut kept_worst, _) = repair.worst();
+        let mut phase = Phase::new(
+            vec![MoveKind::SizeUpMatch, MoveKind::SizeUp],
+            10,
+            start,
+            start,
+        );
+
+        let ended = repair
+            .endpoint_passes(PassRule::LastGasp, 1, end, &mut phase, &mut kept_worst)
+            .unwrap();
+
+        assert_eq!(ended, EndpointEnd::Next);
+        assert_eq!(repair.worst().0, kept_worst);
+        let master = |name: &str| {
+            let cell = repair.resizer.db.cell_id(name).unwrap();
+            repair
+                .resizer
+                .link
+                .cell(repair.resizer.db, cell)
+                .unwrap()
+                .1
+                .name
+                .clone()
+        };
+        assert_eq!(
+            (master("s1"), master("b1")),
+            ("STRONG".to_string(), "BUF_X1".to_string())
+        );
     });
 }
