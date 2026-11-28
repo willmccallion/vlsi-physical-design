@@ -12,7 +12,7 @@ use pare_common::db::global_route::{
     NetRoute, PinGridLocation, RoutePoint, RouteSegment, RouteSource,
 };
 use pare_common::db::indices::{LayerId, NetId};
-use pare_common::db::liberty::{Edge, EdgeValues, MinMax};
+use pare_common::db::liberty::{Edge, EdgeValues, Liberty, MinMax};
 use pare_common::db::library::SignalUse;
 use pare_common::units::{FaradsPerMeter, OhmsPerMeter};
 use std::fmt::Write;
@@ -307,9 +307,17 @@ fn a_net_across_the_die_gets_repeaters_that_bring_every_slew_within_its_limit() 
 /// Runs `test` on a repair of [`apart`], wired, with the slew shape factor
 /// 2.0, so that the arithmetic of a test is by hand.
 fn with_a_repairer(constraints: &str, test: impl FnOnce(&mut Repairer<'_, '_, crate::sta::Sta>)) {
+    with_a_repairer_over(&cells(&clock_cells_source()), constraints, test);
+}
+
+/// [`with_a_repairer`] over the cells of `lib`.
+fn with_a_repairer_over(
+    lib: &Liberty,
+    constraints: &str,
+    test: impl FnOnce(&mut Repairer<'_, '_, crate::sta::Sta>),
+) {
     let mut db = apart();
-    let lib = cells(&clock_cells_source());
-    with_wired_session(&mut db, &lib, constraints, |resizer| {
+    with_wired_session(&mut db, lib, constraints, |resizer| {
         resizer.slew_rc_factor = 2.0;
         test(&mut Repairer::new(resizer));
     });
@@ -449,7 +457,16 @@ fn a_junction_isolates_the_longer_branch_when_the_wire_is_too_long() {
 
 #[test]
 fn a_junction_branch_presents_the_sum_of_its_loads_and_the_tighter_slew_limit() {
-    with_a_repairer("", |repairer| {
+    let source = clock_cells_source()
+        .replace(
+            "capacitance : 1.1 ;",
+            "capacitance : 1.1 ; fanout_load : 2.0 ;",
+        )
+        .replace(
+            "capacitance : 0.95 ;",
+            "capacitance : 0.95 ; fanout_load : 3.0 ;",
+        );
+    with_a_repairer_over(&cells(&source), "", |repairer| {
         let at = Point::new(Dbu::new(2000), Dbu::new(2800));
         let load = |name: &str| {
             let pin = pin(repairer.resizer.db, name);
@@ -466,7 +483,8 @@ fn a_junction_branch_presents_the_sum_of_its_loads_and_the_tighter_slew_limit() 
             .unwrap();
 
         assert!((branch.cap - (a.cap + b.cap)).abs() < femtofarads(1e-9));
-        assert!((branch.fanout - (a.fanout + b.fanout)).abs() < 1e-12);
+        assert!((a.fanout - 2.0).abs() < 1e-12 && (b.fanout - 3.0).abs() < 1e-12);
+        assert!((branch.fanout - 5.0).abs() < 1e-12);
         assert_eq!(branch.max_load_slew, a.max_slew.min(b.max_slew));
         assert_eq!(branch.loads.len(), 2);
     });
@@ -709,18 +727,31 @@ fn a_driver_of_each_kind() -> NetlistDB {
                              - i INV_X1 + PLACED ( 10000 2800 ) N ;\n\
                              - g AND2_X1 + PLACED ( 14000 2800 ) N ;\n\
                              - f DFF_X1 + PLACED ( 18000 2800 ) N ;\n\
-                             - s IDEAL + PLACED ( 24000 2800 ) N ;\n",
+                             - s IDEAL + PLACED ( 24000 2800 ) N ;\n\
+                             - sl SLOWSLEW + PLACED ( 30000 2800 ) N ;\n",
                 nets: "- in ( PIN in ) ( cb A ) ( g B ) ;\n- n1 ( cb Z ) ( b A ) ;\n\
                        - n2 ( b Z ) ( i A ) ;\n- n3 ( i ZN ) ( g A ) ;\n\
                        - n4 ( g Z ) ( f D ) ;\n- clk ( PIN clk ) ( f CK ) ;\n\
-                       - n5 ( f Q ) ( s A ) ;\n- out ( s Z ) ( PIN out ) ;\n",
-                inputs: &["in", "clk"],
-                outputs: &["out"],
+                       - n5 ( f Q ) ( s A ) ;\n- out ( s Z ) ( PIN out ) ;\n\
+                       - slin ( PIN slin ) ( sl A ) ;\n- slout ( sl Z ) ( PIN slout ) ;\n",
+                inputs: &["in", "clk", "slin"],
+                outputs: &["out", "slout"],
             },
         ),
-        &[("BUF_X1", "IDEAL")],
+        &[("BUF_X1", "IDEAL"), ("BUF_X1", "SLOWSLEW")],
     )
 }
+
+/// A buffer whose delay climbs steeply with its load and slew hardly at all,
+/// so that the load for a slew is far past a guess made from the delay.
+const SLOWSLEW_BUFFER: &str = "cell (SLOWSLEW) { area : 0.8 ;
+        pin (A) { direction : input ; capacitance : 0.97 ; }
+        pin (Z) { direction : output ; function : \"A\" ; max_capacitance : 6000.0 ;
+          timing () { related_pin : \"A\" ; timing_sense : positive_unate ;
+            cell_rise (delay_t) { values (\"0.1, 1.0\", \"0.1, 1.0\") ; }
+            cell_fall (delay_t) { values (\"0.1, 1.0\", \"0.1, 1.0\") ; }
+            rise_transition (delay_t) { values (\"0.01, 0.05\", \"0.01, 0.05\") ; }
+            fall_transition (delay_t) { values (\"0.01, 0.05\", \"0.01, 0.05\") ; } } } }";
 
 /// A buffer whose delay and slew do not depend on its load.
 const IDEAL_BUFFER: &str = "cell (IDEAL) { area : 0.8 ;
@@ -735,19 +766,19 @@ const IDEAL_BUFFER: &str = "cell (IDEAL) { area : 0.8 ;
 #[test]
 fn the_load_that_gives_a_driver_a_slew_is_as_found_for_each_kind_of_cell_and_slew() {
     let mut db = a_driver_of_each_kind();
-    let drivers = ["cb/Z", "b/Z", "i/ZN", "g/Z", "f/Q"].map(|name| pin(&db, name));
+    let drivers = ["cb/Z", "b/Z", "i/ZN", "g/Z", "f/Q", "sl/Z"].map(|name| pin(&db, name));
     let ideal = pin(&db, "s/Z");
     let port = db.io_pins[db.io_pin_id("in").unwrap()].pin;
     let mut lines = String::new();
 
     with_wired_session(
         &mut db,
-        &crate::testing::cells_with(IDEAL_BUFFER),
+        &crate::testing::cells_with(&format!("{IDEAL_BUFFER}\n{SLOWSLEW_BUFFER}")),
         "",
         |resizer| {
             let repairer = Repairer::new(resizer);
             for driver in drivers {
-                for slew_ps in [5.0, 10.0, 20.0, 40.0, 80.0, 150.0, 300.0] {
+                for slew_ps in [5.0, 10.0, 20.0, 30.0, 40.0, 80.0, 150.0, 300.0] {
                     let slew = Seconds::new(slew_ps * 1e-12);
                     let found = repairer.slew_load_cap(driver, slew).unwrap();
                     let (lib, port) = repairer
@@ -790,9 +821,9 @@ fn inserted_repairing_driver(
     extra: &str,
     constraints: &str,
     driver: &str,
-) -> usize {
+) -> RepairSummary {
     let driver = pin(&db, driver);
-    let mut inserted = 0;
+    let mut found = RepairSummary::default();
     with_wired_session(
         &mut db,
         &crate::testing::cells_with(extra),
@@ -800,10 +831,10 @@ fn inserted_repairing_driver(
         |resizer| {
             let mut repairer = Repairer::new(resizer);
             repairer.repair_driver(driver).unwrap();
-            inserted = repairer.summary.inserted;
+            found = repairer.summary.clone();
         },
     );
-    inserted
+    found
 }
 
 /// `driver_cell` placed at the origin driving a net of `master` placed at
@@ -838,14 +869,17 @@ fn a_net_with_a_slew_over_its_limit_gets_repeaters_unless_it_is_a_supply_or_cons
     supply.nets[net].signal_use = SignalUse::Power;
     let tied = far_net("TIEH", ("Z", "D"), "DFF_X1", true);
 
-    let plain = inserted_repairing_driver(flop_to_flop(), tie, "", "d/Q");
-    let of_a_supply = inserted_repairing_driver(supply, tie, "", "d/Q");
-    let of_a_constant = inserted_repairing_driver(tied, tie, "", "d/Z");
+    let plain = inserted_repairing_driver(flop_to_flop(), tie, LOAD_LIMIT, "d/Q");
+    let of_a_supply = inserted_repairing_driver(supply, tie, LOAD_LIMIT, "d/Q");
+    let of_a_constant = inserted_repairing_driver(tied, tie, LOAD_LIMIT, "d/Z");
 
-    assert!(plain > 0);
-    assert_eq!(of_a_supply, 0);
-    assert_eq!(of_a_constant, 0);
+    assert!(plain.inserted > 0 && plain.cap_violations > 0);
+    assert_eq!(of_a_supply, RepairSummary::default());
+    assert_eq!(of_a_constant, RepairSummary::default());
 }
+
+/// A design load limit that every long net breaks.
+const LOAD_LIMIT: &str = "set_max_capacitance 1.0 [current_design]\n";
 
 /// A clock buffer `cb` next to its flop and another flop `far` away that
 /// only data reaches, from the first.
