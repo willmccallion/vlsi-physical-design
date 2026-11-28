@@ -3,35 +3,21 @@
 
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
+use common::{Work, at, clock_cells, repaired_in_session};
 use pare_common::db::design::NetlistDB;
-use pare_common::db::liberty::Liberty;
-use pare_common::db::parser::{def, lef, liberty, sdc};
-use pare_common::geom::dbu::{Dbu, DbuPerMicron};
+use pare_common::geom::dbu::Dbu;
 use pare_common::testing;
-use pare_common::units::{FaradsPerMeter, OhmsPerMeter, Seconds};
-use pare_resizer::WireRc;
-use pare_resizer::{
-    ClockNetwork, Constants, Context, HoldOptions, Link, Namer, Netlist, Repairer, Resizer,
-    SessionInputs, SetupOptions, Sta, repair_hold, repair_setup,
-};
+use pare_common::units::Seconds;
+use pare_resizer::{HoldOptions, Repairer, Resizer, SetupOptions, Sta, repair_hold, repair_setup};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
-
-fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../cts/tests/fixtures")
-        .join(name)
-}
-
-/// Where column `c` and row `r` of the site grid put a cell, as DEF text.
-fn at(c: usize, r: usize) -> String {
-    format!("( {} {} ) N", 2000 + c * 380, 2000 + r * 2800)
-}
+use std::path::Path;
 
 /// Three kinds of work for repair, as DEF cells and nets: eight flop to
 /// flop paths through six gates spread across the die, a buffer fanning
 /// out to 24 flops all over it, and four pairs of flops side by side.
-fn timing_work() -> (Vec<String>, Vec<String>) {
+fn timing_work() -> Work {
     let mut cells = Vec::new();
     let mut nets = Vec::new();
     for s in 0..8 {
@@ -68,13 +54,13 @@ fn timing_work() -> (Vec<String>, Vec<String>) {
         cells.push(format!("- hb{h} DFF_X1 + PLACED {} ;", at(512, row)));
         nets.push(format!("- h{h} ( ha{h} Q ) ( hb{h} D ) ;"));
     }
-    (cells, nets)
+    Work { cells, nets }
 }
 
 /// Nets design repair splits, as DEF cells and nets: a buffer driving 180
 /// flops, past the load limit of any size of it, four flops each driving one flop across the
 /// die, and one driving three flops at the die's far corners.
-fn long_and_loaded_nets() -> (Vec<String>, Vec<String>) {
+fn long_and_loaded_nets() -> Work {
     let mut cells = Vec::new();
     let mut nets = Vec::new();
     cells.push(format!("- fan BUF_X1 + PLACED {} ;", at(500, 70)));
@@ -100,58 +86,7 @@ fn long_and_loaded_nets() -> (Vec<String>, Vec<String>) {
         cells.push(format!("- ffc{n} DFF_X1 + PLACED {} ;", at(c, r)));
     }
     nets.push("- m ( ffm Q ) ( ffc0 D ) ( ffc1 D ) ( ffc2 D ) ;".to_string());
-    (cells, nets)
-}
-
-/// A die of 140 rows holding `cells` and `nets`, every flop clocked from
-/// the port `clk`.
-fn design_text(cells: &[String], mut nets: Vec<String>) -> String {
-    let mut clock = String::from("- clk ( PIN clk )");
-    for cell in cells.iter().filter(|c| c.contains(" DFF_")) {
-        let name = cell.split_whitespace().nth(1).unwrap();
-        let _ = write!(clock, " ( {name} CK )");
-    }
-    nets.push(clock + " + USE CLOCK ;");
-
-    let mut text = String::from(
-        "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN flow ;\n\
-         UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 400000 400000 ) ;\n",
-    );
-    for r in 0..140 {
-        let orient = if r % 2 == 0 { "N" } else { "FS" };
-        let _ = writeln!(
-            text,
-            "ROW ROW_{r} core 2000 {} {orient} DO 1000 BY 1 STEP 380 0 ;",
-            2000 + r * 2800
-        );
-    }
-    let _ = writeln!(text, "COMPONENTS {} ;", cells.len());
-    for cell in cells {
-        let _ = writeln!(text, "{cell}");
-    }
-    text.push_str(
-        "END COMPONENTS\nPINS 2 ;\n\
-         - clk + NET clk + DIRECTION INPUT + USE CLOCK\n  \
-         + PORT + LAYER metal2 ( -35 0 ) ( 35 70 )\n  + PLACED ( 200000 0 ) N ;\n\
-         - in0 + NET in0 + DIRECTION INPUT + USE SIGNAL\n  \
-         + PORT + LAYER metal2 ( -35 0 ) ( 35 70 )\n  + PLACED ( 0 200000 ) N ;\n\
-         END PINS\n",
-    );
-    let _ = writeln!(text, "NETS {} ;", nets.len());
-    for net in &nets {
-        let _ = writeln!(text, "{net}");
-    }
-    text.push_str("END NETS\nEND DESIGN\n");
-    text
-}
-
-fn load((cells, nets): (Vec<String>, Vec<String>)) -> (NetlistDB, Liberty) {
-    let units = DbuPerMicron::new(2000).unwrap();
-    let library = lef::parse_files(&[fixture("clock.lef")], units).unwrap();
-    let text = design_text(&cells, nets);
-    let db = def::parse_str(&text, Path::new("flow.def"), library).unwrap();
-    let lib = liberty::parse_file(&fixture("clock.lib")).unwrap();
-    (db, lib)
+    Work { cells, nets }
 }
 
 /// Every cell with its master and place, as text.
@@ -173,51 +108,15 @@ fn cells_text(db: &NetlistDB) -> String {
 /// What `repair` reports of a timed session over the design of `work`
 /// under a clock of `period_ns`, then every cell once the session ends.
 fn repaired_text(
-    work: (Vec<String>, Vec<String>),
+    work: Work,
     period_ns: f64,
     repair: impl FnOnce(&mut Resizer<'_, Sta>) -> String,
 ) -> String {
-    let (mut db, lib) = load(work);
-    let constraints = sdc::parse_str(
-        &format!(
-            "create_clock -name core -period {period_ns} [get_ports clk]\n\
-             set_input_delay 0.1 -clock core [get_ports in0]\n"
-        ),
-        Path::new("flow.sdc"),
-        &db,
-        &lib,
-    )
-    .unwrap();
-    let link = Link::new(&db, &lib, &[]).unwrap();
-    let buffers = link.find_buffers(&db).unwrap();
-    let (constants, clocks) = {
-        let netlist = Netlist::new(&db, &link);
-        let constants = Constants::find(&netlist);
-        let clocks = ClockNetwork::from_sdc(&netlist, &constraints, &constants);
-        (constants, clocks)
-    };
-    let rc = WireRc {
-        resistance: OhmsPerMeter::from_ohms_per_micron(3.5),
-        capacitance: FaradsPerMeter::from_femtofarads_per_micron(0.1),
-        layer: db.library.routing_layer_id("metal2").unwrap(),
-    };
-    let context = Context {
-        link: &link,
-        clocks: &clocks,
-        constants: &constants,
-        clock_rc: None,
-    };
-    let mut namer = Namer::new();
-    let inputs = SessionInputs {
-        db: &mut db,
-        context,
-        rc,
-        buffers,
-        namer: &mut namer,
-    };
-    let mut resizer = Resizer::timed(inputs, &constraints).unwrap();
-    let reported = repair(&mut resizer);
-    let _ = resizer.finish().unwrap();
+    let constraints = format!(
+        "create_clock -name core -period {period_ns} [get_ports clk]\n\
+         set_input_delay 0.1 -clock core [get_ports in0]\n"
+    );
+    let (reported, db) = repaired_in_session(work, &constraints, &clock_cells(), repair);
     format!("{reported}\n{}", cells_text(&db))
 }
 
