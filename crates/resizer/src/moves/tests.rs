@@ -1826,3 +1826,70 @@ fn a_load_limit_of_zero_limits_nothing() {
         "set_max_capacitance 0.0 [current_design]\n"
     ));
 }
+
+/// How much later the previous driver of buffer `b1` of `db` settles when
+/// the buffer's load is added to it, by its own library's tables, and the
+/// slack flop `p0` beside the buffer has under a clock of 1 ns.
+fn slowing_beside_a_loaded_port(db: &mut NetlistDB, constraints: &str) -> (Seconds, Seconds) {
+    let lib = cells(&clock_cells_source());
+    let p0_d = pin(db, "p0/D");
+    let mut found = None;
+    on_site_with(
+        Wires::Ideal,
+        db,
+        &lib,
+        constraints,
+        ("out", "b1/Z"),
+        |resizer, path, index| {
+            let at = site(resizer, path, index).unwrap();
+            let prev = at.prev_driver.unwrap();
+            let (prev_lib, prev_port) = resizer.link.pin_port(resizer.db, prev).unwrap();
+            let PinOwner::Cell { cell, .. } = resizer.db.pins[prev].owner else {
+                panic!("a flop drives the buffer");
+            };
+            let buffer = resizer.link.liberty.buffer_cell(at.lib).unwrap();
+            let in_cap = resizer.link.liberty.cell(at.lib).ports[buffer.input].capacitance();
+            let old_load = resizer.load_cap(prev);
+            let new_load = old_load + resizer.load_cap(at.driver) - in_cap;
+            let slews = resizer.input_slews(cell);
+            let delay = |load: Farads| {
+                let flop = resizer.link.liberty.cell(prev_lib);
+                gate_delays(flop, prev_port, load, &resizer.targets.slews, Some(&slews))
+                    .0
+                    .get(at.prev_edge.unwrap())
+            };
+            let slack = resizer.sta().slack(p0_d, MinMax::Max).time().unwrap();
+            found = Some((delay(new_load) - delay(old_load), slack));
+        },
+    );
+    found.unwrap()
+}
+
+/// Whether `Unbuffer` takes `b1` out when the flop `p0` beside it has the
+/// slack the removal costs it, `extra` more.
+fn unbuffered_with_slack_to_spare(extra: Seconds) -> bool {
+    let loaded = "set_load 30 [get_ports out]\nset_output_delay 0.1 -clock clk [get_ports out]\n";
+    let (slowing, slack) = {
+        let mut db = buffer_to_remove(1, BufferLoads::Port);
+        slowing_beside_a_loaded_port(&mut db, &format!("{ONE_NS}{loaded}"))
+    };
+    assert!(slowing > Seconds::new(20e-12), "{slowing:?}");
+    let period = Seconds::new(1e-9) - slack + slowing + extra;
+    let clock = format!(
+        "create_clock -name clk -period {} [get_ports clk]\n",
+        period.get() * 1e9
+    );
+    let mut db = buffer_to_remove(1, BufferLoads::Port);
+
+    unbuffered(&mut db, &format!("{clock}{loaded}"), "out")
+}
+
+#[test]
+fn a_buffer_is_taken_out_when_the_slack_beside_it_covers_the_slowing_of_its_driver() {
+    assert!(unbuffered_with_slack_to_spare(Seconds::new(2e-12)));
+}
+
+#[test]
+fn a_buffer_is_kept_when_the_slack_beside_it_falls_short_of_the_slowing_of_its_driver() {
+    assert!(!unbuffered_with_slack_to_spare(Seconds::new(-2e-12)));
+}
