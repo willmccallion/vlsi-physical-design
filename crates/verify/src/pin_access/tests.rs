@@ -1,5 +1,5 @@
 use super::*;
-use pare_common::db::design::{PlacementStatus, SpecialNet, SpecialWire, TrackAxis, TrackDef};
+use pare_common::db::design::{PlacementStatus, Row, SpecialNet, SpecialWire, TrackAxis, TrackDef};
 use pare_common::db::indices::{CutLayerId, IdVec, MacroId, MacroPinId, SiteId};
 use pare_common::db::library::{
     CoreKind, CutLayer, Library, Macro, MacroClass, MacroPin, PinDirection, RoutingLayer, Shape,
@@ -638,17 +638,18 @@ fn pad_block_directly(metal: &LayerMetal, pad: &Rect<Dbu>) -> PadBlock {
         .fold(PadBlock::Clear, |b, f| b.and(PadBlock::of(f.holder)))
 }
 
-#[test]
-fn pad_stretches_agree_with_checking_every_via_position() {
-    let (db, _) = design_full(3900, Some(wide_metal_table()), None, Some(2000));
-    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+/// Checks that the stretches the check works out for the pads of the vias
+/// up from M2 agree, at every `step`th origin along each M3 track, with
+/// measuring the pad against all of M3's fixed metal.
+fn assert_pad_blocks_match_direct_checks(db: &NetlistDB, step: usize) {
+    let access = PinAccess::new(db, LayerId(1)).unwrap();
     let up = access.up.as_ref().unwrap();
-    let metal = LayerMetal::new(&db, LayerId(2));
+    let metal = LayerMetal::new(db, LayerId(2));
     let mut seen = std::collections::HashSet::new();
 
     for (t, &track) in up.tracks.iter().enumerate() {
         for (k, via) in up.vias.iter().enumerate() {
-            for x in (-1000..11000).step_by(7) {
+            for x in (-1500..11_500).step_by(step) {
                 let at = pt(x, track.get());
                 let direct = pad_block_directly(&metal, &via.pad.translate(at));
                 assert_eq!(
@@ -661,4 +662,773 @@ fn pad_stretches_agree_with_checking_every_via_position() {
         }
     }
     assert_eq!(seen.len(), 2, "both blocked and clear pads are compared");
+}
+
+#[test]
+fn pad_stretches_agree_with_checking_every_via_position() {
+    let (db, _) = design_full(3900, Some(wide_metal_table()), None, Some(2000));
+
+    assert_pad_blocks_match_direct_checks(&db, 7);
+}
+
+#[test]
+fn rectangles_overlapping_in_one_axis_run_side_by_side_by_that_overlap() {
+    let run = parallel_run(&rect(0, 0, 100, 100), &rect(50, 200, 150, 300));
+
+    assert_eq!(run, Dbu::new(50));
+}
+
+#[test]
+fn rectangles_apart_in_both_axes_have_a_negative_run() {
+    let run = parallel_run(&rect(0, 0, 100, 100), &rect(200, 250, 300, 300));
+
+    assert_eq!(run, Dbu::new(-100));
+}
+
+#[test]
+fn touching_rectangles_are_too_close_at_any_spacing() {
+    assert!(too_close(
+        &rect(0, 0, 100, 100),
+        &rect(100, 0, 200, 100),
+        Dbu::ZERO
+    ));
+}
+
+#[test]
+fn side_by_side_rectangles_are_too_close_only_inside_the_spacing() {
+    let (a, b) = (rect(0, 0, 100, 100), rect(150, 20, 250, 80));
+
+    assert!(too_close(&a, &b, Dbu::new(51)));
+    assert!(!too_close(&a, &b, Dbu::new(50)));
+}
+
+#[test]
+fn diagonal_rectangles_are_too_close_inside_the_corner_distance() {
+    let (a, b) = (rect(0, 0, 100, 100), rect(160, 180, 300, 300));
+
+    assert!(
+        too_close(&a, &b, Dbu::new(101)),
+        "60 by 80 is 100 corner to corner"
+    );
+    assert!(!too_close(&a, &b, Dbu::new(100)));
+}
+
+fn metal_with_ranges(ranges: Vec<WidthRangeSpacing>) -> LayerMetal {
+    LayerMetal {
+        fixed: RTree::new(),
+        width: Dbu::new(100),
+        min_spacing: Dbu::new(100),
+        table: None,
+        ranges,
+        reach: Dbu::new(150),
+        default_width_obstructions: false,
+    }
+}
+
+fn range_rule(min_width: i64, max_width: i64, spacing: i64) -> WidthRangeSpacing {
+    WidthRangeSpacing {
+        spacing: Dbu::new(spacing),
+        min_width: Dbu::new(min_width),
+        max_width: Dbu::new(max_width),
+    }
+}
+
+/// The spacing between two parallel bars `w1` and `w2` wide.
+fn required_between(metal: &LayerMetal, w1: i64, w2: i64) -> Dbu {
+    let shape = rect(0, 0, w1, 1000);
+    let other = of_net(1, rect(2000, 0, 2000 + w2, 1000));
+    metal.required(&shape, &other)
+}
+
+#[test]
+fn a_width_range_rule_raises_the_spacing_of_a_shape_in_the_range() {
+    let metal = metal_with_ranges(vec![range_rule(200, 300, 150)]);
+
+    assert_eq!(required_between(&metal, 250, 100), Dbu::new(150));
+    assert_eq!(required_between(&metal, 100, 250), Dbu::new(150));
+    assert_eq!(required_between(&metal, 200, 300), Dbu::new(150));
+}
+
+#[test]
+fn a_width_range_rule_leaves_shapes_outside_the_range_at_the_minimum() {
+    let metal = metal_with_ranges(vec![range_rule(200, 300, 150)]);
+
+    assert_eq!(required_between(&metal, 100, 100), Dbu::new(100));
+    assert_eq!(required_between(&metal, 50, 50), Dbu::new(100));
+    assert_eq!(required_between(&metal, 400, 400), Dbu::new(100));
+}
+
+#[test]
+fn a_width_range_rule_never_lowers_the_spacing() {
+    let metal = metal_with_ranges(vec![range_rule(200, 300, 80), range_rule(200, 300, 100)]);
+
+    assert_eq!(required_between(&metal, 250, 250), Dbu::new(100));
+}
+
+#[test]
+fn an_added_shape_may_sit_apart_from_metal_of_its_net_that_other_metal_of_the_net_bridges() {
+    let metal = metal_with_ranges(Vec::new());
+    let net = Holder::of_net(Some(NetId::new(7)));
+    let near = [
+        of_net(7, rect(0, 400, 240, 540)),
+        of_net(7, rect(100, 400, 240, 950)),
+    ];
+
+    assert!(metal.clear_added(
+        &rect(100, 600, 240, 880),
+        net,
+        &NeighbourMetal::default(),
+        &near
+    ));
+}
+
+#[test]
+fn an_added_shape_may_not_sit_apart_from_metal_of_its_net_across_an_unfilled_gap() {
+    let metal = metal_with_ranges(Vec::new());
+    let net = Holder::of_net(Some(NetId::new(7)));
+    let near = [of_net(7, rect(0, 400, 240, 540))];
+
+    assert!(!metal.clear_added(
+        &rect(100, 600, 240, 880),
+        net,
+        &NeighbourMetal::default(),
+        &near
+    ));
+}
+
+#[test]
+fn the_vias_up_from_a_layer_leave_out_those_a_def_defines() {
+    let (mut db, _) = design();
+    let def_via = ViaDef {
+        source: ViaSource::Def,
+        name: "FROM_DEF".into(),
+        ..via(
+            "",
+            CutLayerId(0),
+            metal(LayerId(0), rect(-50, -50, 50, 50)),
+            metal(LayerId(1), rect(-50, -50, 50, 50)),
+        )
+    };
+    let _ = db.library.add_via(def_via).unwrap();
+
+    let vias = ViaUp::all_between(&db.library, LayerId(0), LayerId(1));
+
+    assert_eq!(vias.len(), 2);
+}
+
+#[test]
+fn a_stretch_covers_its_last_origin() {
+    let stretches = PadStretches(vec![stretch(0, 10, PadBlock::All)]);
+
+    assert_eq!(stretches.at(Dbu::new(10)), PadBlock::All);
+    assert_eq!(stretches.at(Dbu::new(11)), PadBlock::Clear);
+}
+
+/// `design` with M2's pitches set to `pitch_x` and `pitch_y`.
+fn design_with_pitches(pitch_x: i64, pitch_y: i64) -> NetlistDB {
+    let (mut db, _) = design();
+    let m2 = &mut db.library.routing_layers[LayerId(1)];
+    m2.pitch_x = Dbu::new(pitch_x);
+    m2.pitch_y = Dbu::new(pitch_y);
+    db
+}
+
+fn add_row(db: &mut NetlistDB) {
+    db.rows.push(Row {
+        name: "r".into(),
+        site: SiteId(0),
+        origin: pt(0, 0),
+        orient: Orientation::N,
+        num_x: 10,
+        num_y: 1,
+        step: pt(200, 0),
+    });
+}
+
+#[test]
+fn a_design_with_rows_lets_metal_escape_a_row_height() {
+    let mut db = design_with_pitches(250, 300);
+    add_row(&mut db);
+
+    assert_eq!(escape_reach(&db, LayerId(1)), Dbu::new(2000));
+}
+
+#[test]
+fn without_rows_metal_escapes_ten_pitches_across_a_vertical_layer() {
+    let db = design_with_pitches(250, 300);
+
+    assert_eq!(escape_reach(&db, LayerId(1)), Dbu::new(2500));
+}
+
+#[test]
+fn without_rows_metal_escapes_ten_pitches_across_a_horizontal_layer() {
+    let db = design_with_pitches(250, 300);
+
+    assert_eq!(escape_reach(&db, LayerId(0)), Dbu::new(2000));
+    assert_eq!(escape_reach(&db, LayerId(2)), Dbu::new(2000));
+}
+
+#[test]
+fn a_horizontal_layers_escape_follows_its_own_pitch() {
+    let mut db = design_with_pitches(250, 300);
+    db.library.routing_layers[LayerId(2)].pitch_y = Dbu::new(330);
+
+    assert_eq!(escape_reach(&db, LayerId(2)), Dbu::new(3300));
+}
+
+#[test]
+fn rows_of_zero_height_sites_give_no_escape_reach_of_their_own() {
+    let mut db = design_with_pitches(250, 300);
+    add_row(&mut db);
+    db.library.sites[SiteId(0)].size = pt(200, 0);
+
+    assert_eq!(escape_reach(&db, LayerId(1)), Dbu::new(2500));
+}
+
+#[test]
+fn the_check_reports_the_reach_of_its_escape() {
+    let db = design_with_pitches(250, 300);
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    assert_eq!(access.escape_reach(), Dbu::new(2500));
+}
+
+fn relied_on(
+    access: &PinAccess,
+    db: &NetlistDB,
+    cell: CellId,
+    at: Point<Dbu>,
+) -> Option<Vec<(LayerId, Rect<Dbu>)>> {
+    access.reliance(db, cell, at, Orientation::N, &[])
+}
+
+#[test]
+fn a_free_pins_cell_relies_on_the_pins_own_metal() {
+    let (mut db, m) = design();
+    let cell = cell_at(&mut db, m, 1000);
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    let relied = relied_on(&access, &db, cell, pt(1000, 0)).unwrap();
+
+    assert!(relied.contains(&(LayerId(0), rect(1050, 500, 1150, 1500))));
+}
+
+#[test]
+fn a_free_pins_cell_relies_on_the_pad_and_run_its_via_escapes_by() {
+    let (mut db, m) = design();
+    let cell = cell_at(&mut db, m, 1000);
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    let relied = relied_on(&access, &db, cell, pt(1000, 0)).unwrap();
+
+    let above: Vec<Rect<Dbu>> = relied
+        .iter()
+        .filter(|(layer, _)| *layer == LayerId(1))
+        .map(|&(_, r)| r)
+        .collect();
+    assert_eq!(above.len(), 2, "a via pad and the run it escapes by");
+    assert!(above[0].width() > Dbu::ZERO && above[1].width() > Dbu::ZERO);
+}
+
+#[test]
+fn a_cell_with_a_blocked_pin_relies_on_nothing() {
+    let (mut db, m) = design();
+    let cell = cell_at(&mut db, m, 3800);
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    assert_eq!(relied_on(&access, &db, cell, pt(3800, 0)), None);
+}
+
+#[test]
+fn a_cell_with_only_a_supply_pin_relies_on_nothing_and_is_not_blocked() {
+    let (mut db, m) = design();
+    let cell = cell_at(&mut db, m, 3800);
+    let supply = db.cells[cell].pins[0];
+    let net = db.pins[supply].net;
+    db.nets[net].signal_use = SignalUse::Power;
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    assert_eq!(relied_on(&access, &db, cell, pt(3800, 0)), Some(Vec::new()));
+}
+
+#[test]
+fn a_pin_on_a_supply_net_is_not_counted_as_blocked() {
+    let (mut db, m) = design();
+    let cell = cell_at(&mut db, m, 3800);
+    let supply = db.cells[cell].pins[0];
+    let net = db.pins[supply].net;
+    db.nets[net].signal_use = SignalUse::Ground;
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    assert_eq!(
+        access.blocked_pins(&db, cell, pt(3800, 0), Orientation::N),
+        0
+    );
+}
+
+#[test]
+fn a_pin_on_no_net_needs_no_via_to_reach_it() {
+    let (mut db, m) = design();
+    let cell = db
+        .add_cell(
+            "c".into(),
+            m,
+            pt(3400, 0),
+            Orientation::N,
+            PlacementStatus::Placed,
+        )
+        .unwrap();
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    assert_eq!(
+        access.blocked_pins(&db, cell, pt(3400, 0), Orientation::N),
+        0
+    );
+    assert_eq!(blocked(3400), 1, "on a net, the same pin has no via");
+}
+
+#[test]
+fn a_cells_metal_on_the_checked_layers_is_its_pins_and_obstructions_placed() {
+    let (mut db, _) = design();
+    let site = SiteId(0);
+    let mut master = one_pin_master(
+        "O",
+        site,
+        pin(
+            "a",
+            PinDirection::Input,
+            metal(LayerId(0), rect(50, 500, 150, 1500)),
+        ),
+    );
+    master.obstructions = vec![
+        metal(LayerId(1), rect(200, 0, 300, 100)),
+        metal(LayerId(2), rect(0, 0, 100, 100)),
+    ];
+    let master = db.library.add_macro(master).unwrap();
+    let cell = db
+        .add_cell(
+            "o".into(),
+            master,
+            pt(1000, 0),
+            Orientation::N,
+            PlacementStatus::Placed,
+        )
+        .unwrap();
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    let metal = access.cell_metal(&db, cell, pt(1000, 0), Orientation::N);
+
+    assert_eq!(
+        metal,
+        [
+            (LayerId(0), rect(1050, 500, 1150, 1500)),
+            (LayerId(1), rect(1200, 0, 1300, 100)),
+        ]
+    );
+}
+
+fn wide_table_access() -> PinAccess {
+    let (db, _) = design_with(3900, Some(wide_metal_table()), None);
+    PinAccess::new(&db, LayerId(1)).unwrap()
+}
+
+#[test]
+fn metal_disturbs_reliance_within_its_layers_spacing() {
+    let access = wide_table_access();
+    let relied = [(LayerId(1), rect(0, 0, 100, 100))];
+
+    assert!(access.disturbs(&[(LayerId(1), rect(220, 0, 320, 100))], &relied));
+    assert!(!access.disturbs(&[(LayerId(1), rect(250, 0, 350, 100))], &relied));
+}
+
+#[test]
+fn the_pin_layers_own_spacing_decides_whether_its_metal_disturbs() {
+    let access = wide_table_access();
+    let relied = [(LayerId(0), rect(0, 0, 100, 100))];
+
+    assert!(access.disturbs(&[(LayerId(0), rect(150, 0, 250, 100))], &relied));
+    assert!(!access.disturbs(&[(LayerId(0), rect(200, 0, 300, 100))], &relied));
+}
+
+#[test]
+fn metal_on_another_layer_does_not_disturb_reliance() {
+    let access = wide_table_access();
+    let relied = [(LayerId(1), rect(0, 0, 100, 100))];
+
+    assert!(!access.disturbs(&[(LayerId(0), rect(0, 0, 100, 100))], &relied));
+    assert!(!access.disturbs(&[], &relied));
+    assert!(!access.disturbs(&[(LayerId(1), rect(0, 0, 100, 100))], &[]));
+}
+
+/// The check on a design whose first via's M2 pad is `pad`.
+fn access_with_pad(pad: Rect<Dbu>) -> PinAccess {
+    let (mut db, _) = design();
+    for v in &mut db.library.vias {
+        if v.cut == CutLayerId(0) {
+            v.shapes[2].rect = pad;
+        }
+    }
+    PinAccess::new(&db, LayerId(1)).unwrap()
+}
+
+#[test]
+fn the_reach_of_a_via_pad_counts_its_far_side_in_x() {
+    let access = access_with_pad(rect(-200, -50, 100, 50));
+
+    assert_eq!(access.reach(), Dbu::new(300));
+}
+
+#[test]
+fn the_reach_of_a_via_pad_counts_its_far_side_in_y() {
+    let access = access_with_pad(rect(-50, -200, 50, 100));
+
+    assert_eq!(access.reach(), Dbu::new(300));
+}
+
+#[test]
+fn the_check_margin_adds_access_escape_and_spacing() {
+    let (db, _) = design();
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+
+    assert_eq!(access.check_margin(), Dbu::new(90 + 2000 + 90 + 100));
+}
+
+#[test]
+fn the_check_margin_counts_the_far_side_of_a_pad_in_x() {
+    let access = access_with_pad(rect(-200, -50, 100, 50));
+
+    assert_eq!(access.check_margin(), Dbu::new(200 + 2000 + 90 + 100));
+}
+
+#[test]
+fn the_check_margin_counts_the_far_side_of_a_pad_in_y() {
+    let access = access_with_pad(rect(-50, -200, 50, 100));
+
+    assert_eq!(access.check_margin(), Dbu::new(200 + 2000 + 90 + 100));
+}
+
+/// How many pins are blocked of a cell at the origin on a net, whose one
+/// master has its M1 pin at `pin_rect`.
+fn blocked_with_pin_at(pin_rect: Rect<Dbu>) -> usize {
+    let (mut db, _) = design();
+    let master = one_pin_master(
+        "N",
+        SiteId(0),
+        pin("a", PinDirection::Input, metal(LayerId(0), pin_rect)),
+    );
+    let master = db.library.add_macro(master).unwrap();
+    let cell = cell_at(&mut db, master, 0);
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+    access.blocked_pins(&db, cell, pt(0, 0), Orientation::N)
+}
+
+#[test]
+fn a_via_whose_cut_would_stick_out_of_the_pin_sideways_does_not_reach_it() {
+    assert_eq!(blocked_with_pin_at(rect(150, 500, 250, 1500)), 1);
+}
+
+#[test]
+fn a_via_whose_cut_would_stick_out_of_the_pin_lengthways_does_not_reach_it() {
+    assert_eq!(blocked_with_pin_at(rect(50, 250, 150, 350)), 1);
+}
+
+fn m3(rect: Rect<Dbu>) -> Shape {
+    metal(LayerId(2), rect)
+}
+
+/// A design whose escape works in chunks of 1.6 um along M3, with M3
+/// metal in short pieces across the die, beside its chunk boundaries and
+/// past its edges, at the edge of the spacing from the tracks, and the M3
+/// pad of its vias `pad`.
+fn chunked_design_with_pad(pad: Rect<Dbu>) -> NetlistDB {
+    let (mut db, _) = design();
+    db.library.routing_layers[LayerId(1)].pitch_x = Dbu::new(20);
+    for v in &mut db.library.vias {
+        if v.cut == CutLayerId(1) {
+            v.shapes[2].rect = pad;
+        }
+    }
+    for blockage in [
+        rect(-800, 1000, -400, 1100),
+        rect(10_400, 1500, 10_800, 1600),
+        rect(11_500, 1700, 11_600, 1800),
+        rect(1440, 2100, 1560, 2200),
+        rect(1650, 3000, 1750, 3100),
+        rect(3100, 800, 4800, 900),
+        rect(4790, 2600, 4900, 2700),
+        rect(6000, 1149, 6100, 1249),
+        rect(7000, 751, 7100, 851),
+        rect(8000, 1950, 8030, 2050),
+        rect(9500, 3500, 9700, 3600),
+    ]
+    .map(m3)
+    {
+        let _ = db.routing_blockages.push(blockage);
+    }
+    db
+}
+
+#[test]
+fn pad_stretches_of_chunks_agree_with_checking_every_via_position() {
+    let db = chunked_design_with_pad(rect(-90, -50, 90, 50));
+
+    assert_pad_blocks_match_direct_checks(&db, 1);
+}
+
+#[test]
+fn pad_stretches_agree_for_a_pad_reaching_far_to_the_left() {
+    let db = chunked_design_with_pad(rect(-700, -50, 100, 50));
+
+    assert_pad_blocks_match_direct_checks(&db, 1);
+}
+
+#[test]
+fn pad_stretches_agree_for_a_pad_reaching_far_to_the_right() {
+    let db = chunked_design_with_pad(rect(-100, -50, 700, 50));
+
+    assert_pad_blocks_match_direct_checks(&db, 1);
+}
+
+fn chunk_of_origin(die_min_x: i64, along: i64) -> usize {
+    let mut db = chunked_design_with_pad(rect(-90, -50, 90, 50));
+    db.die_area = rect(die_min_x, 0, die_min_x + 10_000, 4000);
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+    access.up.as_ref().unwrap().chunk_of(Dbu::new(along))
+}
+
+#[test]
+fn a_via_origin_falls_in_the_chunk_counted_from_the_dies_edge() {
+    assert_eq!(chunk_of_origin(0, 0), 0);
+    assert_eq!(chunk_of_origin(0, 1599), 0);
+    assert_eq!(chunk_of_origin(0, 1600), 1);
+    assert_eq!(chunk_of_origin(0, 4800), 3);
+    assert_eq!(chunk_of_origin(300, 1899), 0);
+    assert_eq!(chunk_of_origin(300, 1900), 1);
+}
+
+#[test]
+fn via_origins_beyond_the_die_fall_in_its_first_and_last_chunks() {
+    assert_eq!(chunk_of_origin(0, -1), 0);
+    assert_eq!(chunk_of_origin(0, -50_000), 0);
+    assert_eq!(chunk_of_origin(0, 9999), 6);
+    assert_eq!(chunk_of_origin(0, 50_000), 6);
+}
+
+fn free_m3_tracks(free: &[i64]) -> Vec<Shape> {
+    (200..=3800)
+        .step_by(200)
+        .filter(|y| !free.contains(y))
+        .map(|y| m3(rect(0, y - 50, 10_000, y + 50)))
+        .collect()
+}
+
+fn design_blocked_by(blockages: Vec<Shape>) -> NetlistDB {
+    let (mut db, _) = design();
+    for blockage in blockages {
+        let _ = db.routing_blockages.push(blockage);
+    }
+    db
+}
+
+/// The run `start` escapes by in `db`, for the net of no cell.
+fn escape_of(db: &NetlistDB, start: Rect<Dbu>) -> Option<Rect<Dbu>> {
+    let access = PinAccess::new(db, LayerId(1)).unwrap();
+    let everything = rect(-100_000, -100_000, 100_000, 100_000);
+    let mut gathered = NeighbourMetal::default();
+    gathered.above.extend(access.metal_above.near(&everything));
+    gathered.below.extend(access.metal_below.near(&everything));
+    gathered.zone = Some(everything);
+    let holder = Holder::of_net(Some(NetId::new(0)));
+    access.escapes(&start, holder, &gathered)
+}
+
+#[test]
+fn metal_escapes_by_the_nearer_track_above_it() {
+    let db = design();
+
+    assert_eq!(
+        escape_of(&db.0, rect(250, 1060, 350, 1160)),
+        Some(rect(250, 1060, 350, 1290))
+    );
+}
+
+#[test]
+fn metal_escapes_by_the_nearer_track_below_it() {
+    let db = design();
+
+    assert_eq!(
+        escape_of(&db.0, rect(250, 1010, 350, 1110)),
+        Some(rect(250, 910, 350, 1110))
+    );
+}
+
+#[test]
+fn metal_between_two_equally_near_tracks_escapes_by_the_one_above() {
+    let db = design();
+
+    assert_eq!(
+        escape_of(&db.0, rect(250, 1050, 350, 1150)),
+        Some(rect(250, 1050, 350, 1290))
+    );
+}
+
+#[test]
+fn metal_over_tracks_escapes_by_the_lowest_of_them() {
+    let db = design();
+
+    assert_eq!(
+        escape_of(&db.0, rect(250, 1000, 350, 1400)),
+        Some(rect(250, 910, 350, 1400))
+    );
+}
+
+#[test]
+fn metal_escapes_by_a_track_exactly_an_escape_reach_below_it() {
+    let db = design_blocked_by(free_m3_tracks(&[200]));
+
+    assert_eq!(
+        escape_of(&db, rect(250, 2200, 350, 2300)),
+        Some(rect(250, 110, 350, 2300))
+    );
+}
+
+#[test]
+fn metal_escapes_by_a_track_within_the_escape_reach_below_it() {
+    let db = design_blocked_by(free_m3_tracks(&[1200]));
+
+    assert_eq!(
+        escape_of(&db, rect(250, 2200, 350, 2300)),
+        Some(rect(250, 1110, 350, 2300))
+    );
+}
+
+#[test]
+fn metal_does_not_escape_by_a_track_beyond_the_escape_reach_below_it() {
+    let db = design_blocked_by(free_m3_tracks(&[200]));
+
+    assert_eq!(escape_of(&db, rect(250, 2400, 350, 2500)), None);
+}
+
+#[test]
+fn metal_escapes_by_a_track_exactly_an_escape_reach_above_it() {
+    let db = design_blocked_by(free_m3_tracks(&[3200]));
+
+    assert_eq!(
+        escape_of(&db, rect(250, 1000, 350, 1200)),
+        Some(rect(250, 1000, 350, 3290))
+    );
+}
+
+#[test]
+fn metal_escapes_by_a_track_within_the_escape_reach_above_it() {
+    let db = design_blocked_by(free_m3_tracks(&[2000]));
+
+    assert_eq!(
+        escape_of(&db, rect(250, 1000, 350, 1200)),
+        Some(rect(250, 1000, 350, 2090))
+    );
+}
+
+#[test]
+fn metal_does_not_escape_by_a_track_beyond_the_escape_reach_above_it() {
+    let db = design_blocked_by(free_m3_tracks(&[3400]));
+
+    assert_eq!(escape_of(&db, rect(250, 1000, 350, 1200)), None);
+}
+
+fn transposed(rect: Rect<Dbu>) -> Rect<Dbu> {
+    Rect::new(
+        pt(rect.min.y.get(), rect.min.x.get()),
+        pt(rect.max.y.get(), rect.max.x.get()),
+    )
+}
+
+/// `db` with every x and y exchanged, so that M2 runs horizontally.
+fn turned(mut db: NetlistDB) -> NetlistDB {
+    for l in &mut db.library.routing_layers {
+        l.direction = match l.direction {
+            Direction::Horizontal => Direction::Vertical,
+            Direction::Vertical => Direction::Horizontal,
+        };
+    }
+    for v in &mut db.library.vias {
+        for s in &mut v.shapes {
+            s.rect = transposed(s.rect);
+        }
+    }
+    for t in &mut db.tracks {
+        t.axis = match t.axis {
+            TrackAxis::X => TrackAxis::Y,
+            TrackAxis::Y => TrackAxis::X,
+        };
+    }
+    for n in &mut db.special_nets {
+        for w in &mut n.wires {
+            w.from = pt(w.from.y.get(), w.from.x.get());
+            w.to = pt(w.to.y.get(), w.to.x.get());
+        }
+    }
+    for s in &mut db.routing_blockages {
+        s.rect = transposed(s.rect);
+    }
+    db.die_area = transposed(db.die_area);
+    db
+}
+
+/// Metal on M2's track at 300 running 1.0 um, escaping past M2 metal
+/// `beside` it, with the layout turned a quarter when `run_across`.
+fn escape_past_obstacle(beside: Rect<Dbu>, run_across: bool) -> Option<Rect<Dbu>> {
+    let db = design_blocked_by(vec![metal(LayerId(1), beside)]);
+    let start = rect(250, 1050, 350, 2050);
+    if run_across {
+        escape_of(&turned(db), transposed(start))
+    } else {
+        escape_of(&db, start)
+    }
+}
+
+#[test]
+fn a_run_may_not_come_within_spacing_of_metal_on_its_right() {
+    assert_eq!(
+        escape_past_obstacle(rect(420, 1700, 520, 1900), false),
+        None
+    );
+}
+
+#[test]
+fn a_run_may_not_come_within_spacing_of_metal_on_its_left() {
+    assert_eq!(
+        escape_past_obstacle(rect(130, 1700, 180, 1900), false),
+        None
+    );
+}
+
+#[test]
+fn a_horizontal_run_may_not_come_within_spacing_of_metal_above_it() {
+    assert_eq!(escape_past_obstacle(rect(420, 1700, 520, 1900), true), None);
+}
+
+#[test]
+fn a_horizontal_run_may_not_come_within_spacing_of_metal_below_it() {
+    assert_eq!(escape_past_obstacle(rect(130, 1700, 180, 1900), true), None);
+}
+
+#[test]
+fn a_pad_blocked_only_by_metal_of_its_own_net_is_clear_for_that_net() {
+    let db = chunked_design_with_pad(rect(-90, -50, 90, 50));
+    let access = PinAccess::new(&db, LayerId(1)).unwrap();
+    let up = access.up.as_ref().unwrap();
+    up.pads[0]
+        .set(vec![PadStretches(vec![stretch(
+            0,
+            1599,
+            PadBlock::Net(NetId::new(7)),
+        )])])
+        .unwrap();
+    let at = pt(100, 0);
+    let on_net = |net| Holder::of_net(Some(NetId::new(net)));
+
+    assert!(up.pad_clear(0, 0, at, on_net(7)));
+    assert!(!up.pad_clear(0, 0, at, on_net(8)));
+    assert!(!up.pad_clear(0, 0, at, Holder::of_net(None)));
 }
