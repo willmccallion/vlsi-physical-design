@@ -1,0 +1,352 @@
+crates/resizer/src/dmp.rs:109:21: replace < with <= in fit_gate
+crates/resizer/src/dmp.rs:109:21: replace < with == in fit_gate
+crates/resizer/src/dmp.rs:109:35: replace < with <= in fit_gate
+crates/resizer/src/dmp.rs:109:60: replace || with && in fit_gate
+crates/resizer/src/dmp.rs:109:66: replace < with <= in fit_gate
+crates/resizer/src/dmp.rs:109:66: replace < with == in fit_gate
+crates/resizer/src/dmp.rs:109:78: replace || with && in fit_gate
+crates/resizer/src/dmp.rs:120:11: replace < with <= in fit_gate
+crates/resizer/src/dmp.rs:120:11: replace < with == in fit_gate
+crates/resizer/src/dmp.rs:159:31: replace * with / in Common<'_>::gate_delays
+crates/resizer/src/dmp.rs:226:35: delete - in Response::v0
+crates/resizer/src/dmp.rs:226:39: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:226:39: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:228:24: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:228:24: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:228:30: replace + with * in Response::v0
+crates/resizer/src/dmp.rs:228:30: replace + with - in Response::v0
+crates/resizer/src/dmp.rs:228:35: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:228:35: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:228:39: replace + with * in Response::v0
+crates/resizer/src/dmp.rs:228:39: replace + with - in Response::v0
+crates/resizer/src/dmp.rs:228:44: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:228:44: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:229:24: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:229:24: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:229:30: replace - with + in Response::v0
+crates/resizer/src/dmp.rs:229:30: replace - with / in Response::v0
+crates/resizer/src/dmp.rs:229:35: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:229:35: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:229:40: replace * with + in Response::v0
+crates/resizer/src/dmp.rs:229:40: replace * with / in Response::v0
+crates/resizer/src/dmp.rs:261:29: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:261:29: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:261:35: replace - with + in Response::vl0
+crates/resizer/src/dmp.rs:261:35: replace - with / in Response::vl0
+crates/resizer/src/dmp.rs:261:40: replace / with % in Response::vl0
+crates/resizer/src/dmp.rs:261:40: replace / with * in Response::vl0
+crates/resizer/src/dmp.rs:262:26: delete - in Response::vl0
+crates/resizer/src/dmp.rs:262:30: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:262:30: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:262:35: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:262:35: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:262:40: replace / with % in Response::vl0
+crates/resizer/src/dmp.rs:262:40: replace / with * in Response::vl0
+crates/resizer/src/dmp.rs:262:46: replace - with + in Response::vl0
+crates/resizer/src/dmp.rs:262:46: replace - with / in Response::vl0
+crates/resizer/src/dmp.rs:263:29: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:263:29: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:263:35: replace / with % in Response::vl0
+crates/resizer/src/dmp.rs:263:35: replace / with * in Response::vl0
+crates/resizer/src/dmp.rs:263:40: replace - with + in Response::vl0
+crates/resizer/src/dmp.rs:263:40: replace - with / in Response::vl0
+crates/resizer/src/dmp.rs:263:45: replace + with * in Response::vl0
+crates/resizer/src/dmp.rs:263:45: replace + with - in Response::vl0
+crates/resizer/src/dmp.rs:263:50: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:263:50: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:263:55: replace / with % in Response::vl0
+crates/resizer/src/dmp.rs:263:55: replace / with * in Response::vl0
+crates/resizer/src/dmp.rs:263:61: replace - with + in Response::vl0
+crates/resizer/src/dmp.rs:263:61: replace - with / in Response::vl0
+crates/resizer/src/dmp.rs:264:35: delete - in Response::vl0
+crates/resizer/src/dmp.rs:264:39: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:264:39: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:265:35: delete - in Response::vl0
+crates/resizer/src/dmp.rs:265:39: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:265:39: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:267:24: replace + with * in Response::vl0
+crates/resizer/src/dmp.rs:267:24: replace + with - in Response::vl0
+crates/resizer/src/dmp.rs:267:28: replace + with * in Response::vl0
+crates/resizer/src/dmp.rs:267:28: replace + with - in Response::vl0
+crates/resizer/src/dmp.rs:267:33: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:267:33: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:267:42: replace + with * in Response::vl0
+crates/resizer/src/dmp.rs:267:42: replace + with - in Response::vl0
+crates/resizer/src/dmp.rs:267:47: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:267:47: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:268:25: replace - with + in Response::vl0
+crates/resizer/src/dmp.rs:268:25: replace - with / in Response::vl0
+crates/resizer/src/dmp.rs:268:30: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:268:30: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:268:35: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:268:35: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:268:44: replace - with + in Response::vl0
+crates/resizer/src/dmp.rs:268:44: replace - with / in Response::vl0
+crates/resizer/src/dmp.rs:268:49: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:268:49: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:268:54: replace * with + in Response::vl0
+crates/resizer/src/dmp.rs:268:54: replace * with / in Response::vl0
+crates/resizer/src/dmp.rs:352:30: replace / with % in Fit::driver_delay_slew
+crates/resizer/src/dmp.rs:352:30: replace / with * in Fit::driver_delay_slew
+crates/resizer/src/dmp.rs:358:36: replace < with <= in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:368:38: replace / with % in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:368:38: replace / with * in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:369:22: replace < with <= in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:369:22: replace < with == in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:372:21: replace < with <= in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:372:21: replace < with == in Fit::load_delay_slew
+crates/resizer/src/dmp.rs:393:25: replace - with + in y
+crates/resizer/src/dmp.rs:422:13: delete - in dy
+crates/resizer/src/dmp.rs:422:32: replace - with + in dy
+crates/resizer/src/dmp.rs:422:32: replace - with / in dy
+crates/resizer/src/dmp.rs:422:42: replace - with + in dy
+crates/resizer/src/dmp.rs:422:42: replace - with / in dy
+crates/resizer/src/dmp.rs:422:57: replace / with % in dy
+crates/resizer/src/dmp.rs:422:57: replace / with * in dy
+crates/resizer/src/dmp.rs:423:30: replace + with - in dy
+crates/resizer/src/dmp.rs:423:38: replace - with + in dy
+crates/resizer/src/dmp.rs:423:38: replace - with / in dy
+crates/resizer/src/dmp.rs:423:65: replace + with * in dy
+crates/resizer/src/dmp.rs:423:65: replace + with - in dy
+crates/resizer/src/dmp.rs:423:89: replace / with % in dy
+crates/resizer/src/dmp.rs:423:89: replace / with * in dy
+crates/resizer/src/dmp.rs:424:32: replace - with + in dy
+crates/resizer/src/dmp.rs:424:58: replace / with % in dy
+crates/resizer/src/dmp.rs:424:58: replace / with * in dy
+crates/resizer/src/dmp.rs:464:34: replace + with * in pi_model
+crates/resizer/src/dmp.rs:464:34: replace + with - in pi_model
+crates/resizer/src/dmp.rs:586:17: replace < with <= in PiPoles::equations
+crates/resizer/src/dmp.rs:586:17: replace < with == in PiPoles::equations
+crates/resizer/src/dmp.rs:586:23: replace || with && in PiPoles::equations
+crates/resizer/src/dmp.rs:586:47: replace || with && in PiPoles::equations
+crates/resizer/src/dmp.rs:593:66: replace * with + in PiPoles::equations
+crates/resizer/src/dmp.rs:593:66: replace * with / in PiPoles::equations
+crates/resizer/src/dmp.rs:594:34: replace * with + in PiPoles::equations
+crates/resizer/src/dmp.rs:594:34: replace * with / in PiPoles::equations
+crates/resizer/src/dmp.rs:599:34: replace * with + in PiPoles::equations
+crates/resizer/src/dmp.rs:599:34: replace * with / in PiPoles::equations
+crates/resizer/src/dmp.rs:603:28: replace * with / in PiPoles::equations
+crates/resizer/src/dmp.rs:603:35: replace - with + in PiPoles::equations
+crates/resizer/src/dmp.rs:612:35: replace + with - in PiPoles::equations
+crates/resizer/src/dmp.rs:613:34: replace * with / in PiPoles::equations
+crates/resizer/src/dmp.rs:613:41: replace - with + in PiPoles::equations
+crates/resizer/src/dmp.rs:630:18: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:630:18: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:630:25: replace * with + in zero_c2
+crates/resizer/src/dmp.rs:630:25: replace * with / in zero_c2
+crates/resizer/src/dmp.rs:631:18: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:631:18: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:631:24: replace * with + in zero_c2
+crates/resizer/src/dmp.rs:631:24: replace * with / in zero_c2
+crates/resizer/src/dmp.rs:631:30: replace + with * in zero_c2
+crates/resizer/src/dmp.rs:631:30: replace + with - in zero_c2
+crates/resizer/src/dmp.rs:632:17: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:632:17: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:633:18: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:633:18: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:634:18: replace - with + in zero_c2
+crates/resizer/src/dmp.rs:634:18: replace - with / in zero_c2
+crates/resizer/src/dmp.rs:634:24: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:634:24: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:634:30: replace * with + in zero_c2
+crates/resizer/src/dmp.rs:634:30: replace * with / in zero_c2
+crates/resizer/src/dmp.rs:635:14: delete - in zero_c2
+crates/resizer/src/dmp.rs:641:21: replace <= with > in zero_c2
+crates/resizer/src/dmp.rs:642:30: replace - with + in zero_c2
+crates/resizer/src/dmp.rs:642:30: replace - with / in zero_c2
+crates/resizer/src/dmp.rs:642:39: replace / with % in zero_c2
+crates/resizer/src/dmp.rs:642:39: replace / with * in zero_c2
+crates/resizer/src/dmp.rs:645:50: replace - with + in zero_c2
+crates/resizer/src/dmp.rs:645:50: replace - with / in zero_c2
+crates/resizer/src/dmp.rs:646:49: replace - with + in zero_c2
+crates/resizer/src/dmp.rs:646:49: replace - with / in zero_c2
+crates/resizer/src/dmp.rs:664:34: replace + with * in zero_c2
+crates/resizer/src/dmp.rs:664:34: replace + with - in zero_c2
+crates/resizer/src/dmp.rs:664:41: replace + with * in zero_c2
+crates/resizer/src/dmp.rs:664:41: replace + with - in zero_c2
+crates/resizer/src/dmp.rs:664:46: replace * with + in zero_c2
+crates/resizer/src/dmp.rs:664:46: replace * with / in zero_c2
+crates/resizer/src/dmp.rs:664:52: replace + with * in zero_c2
+crates/resizer/src/dmp.rs:664:52: replace + with - in zero_c2
+crates/resizer/src/dmp.rs:664:59: replace * with + in zero_c2
+crates/resizer/src/dmp.rs:664:59: replace * with / in zero_c2
+crates/resizer/src/dmp.rs:711:27: replace > with >= in newton_raphson
+crates/resizer/src/dmp.rs:749:20: replace >= with < in lu_decompose
+crates/resizer/src/dmp.rs:762:14: replace + with * in lu_decompose
+crates/resizer/src/dmp.rs:799:12: replace > with >= in find_root
+crates/resizer/src/dmp.rs:799:24: replace > with >= in find_root
+crates/resizer/src/dmp.rs:799:38: replace < with <= in find_root
+crates/resizer/src/dmp.rs:799:38: replace < with == in find_root
+crates/resizer/src/dmp.rs:799:38: replace < with > in find_root
+crates/resizer/src/dmp.rs:799:50: replace < with <= in find_root
+crates/resizer/src/dmp.rs:799:50: replace < with == in find_root
+crates/resizer/src/dmp.rs:808:34: replace > with == in find_root
+crates/resizer/src/dmp.rs:808:34: replace > with >= in find_root
+crates/resizer/src/dmp.rs:810:27: replace - with / in find_root
+crates/resizer/src/dmp.rs:814:37: replace * with / in find_root
+crates/resizer/src/dmp.rs:814:52: replace * with + in find_root
+crates/resizer/src/dmp.rs:815:13: replace || with && in find_root
+crates/resizer/src/dmp.rs:815:33: replace > with == in find_root
+crates/resizer/src/dmp.rs:815:33: replace > with >= in find_root
+crates/resizer/src/dmp.rs:815:44: replace * with + in find_root
+crates/resizer/src/dmp.rs:829:15: replace < with <= in find_root
+crates/resizer/src/dmp.rs:841:10: replace < with <= in exp2
+crates/resizer/src/moves.rs:1016:5: replace buffer_loads_ok -> Result<bool, RepairError> with Ok(true)
+crates/resizer/src/moves.rs:1058:35: replace - with + in side_loads_ok
+crates/resizer/src/moves.rs:1058:58: replace - with + in side_loads_ok
+crates/resizer/src/moves.rs:1059:22: replace < with <= in side_loads_ok
+crates/resizer/src/moves.rs:1059:22: replace < with == in side_loads_ok
+crates/resizer/src/moves.rs:1059:22: replace < with > in side_loads_ok
+crates/resizer/src/moves.rs:1060:37: replace - with + in side_loads_ok
+crates/resizer/src/moves.rs:1061:43: replace || with && in side_loads_ok
+crates/resizer/src/moves.rs:1061:54: replace > with == in side_loads_ok
+crates/resizer/src/moves.rs:1061:54: replace > with >= in side_loads_ok
+crates/resizer/src/moves.rs:1123:72: replace - with + in input_slew_impact_ok
+crates/resizer/src/moves.rs:1126:35: replace - with + in input_slew_impact_ok
+crates/resizer/src/moves.rs:1129:49: replace < with <= in input_slew_impact_ok
+crates/resizer/src/moves.rs:1149:5: replace slews_after_removal -> Result<Option<Vec<(PinId, Seconds)>>, RepairError> with Ok(Some(vec![]))
+crates/resizer/src/moves.rs:1180:35: replace * with + in slews_after_removal
+crates/resizer/src/moves.rs:1180:35: replace * with / in slews_after_removal
+crates/resizer/src/moves.rs:1186:27: replace * with / in slews_after_removal
+crates/resizer/src/moves.rs:1203:31: replace match guard *pin == at_load with true in stitch
+crates/resizer/src/moves.rs:1223:17: delete match arm (Some(l), None) in stitch
+crates/resizer/src/moves.rs:1236:17: replace == with != in join_at_load
+crates/resizer/src/moves.rs:1237:28: replace == with != in join_at_load
+crates/resizer/src/moves.rs:1248:17: replace != with == in join_at_load
+crates/resizer/src/moves.rs:1253:17: replace != with == in join_at_load
+crates/resizer/src/moves.rs:1279:44: replace + with - in slews_in_tree::walk
+crates/resizer/src/moves.rs:1279:59: replace / with * in slews_in_tree::walk
+crates/resizer/src/moves.rs:1279:66: replace * with / in slews_in_tree::walk
+crates/resizer/src/moves.rs:1280:44: replace + with - in slews_in_tree::walk
+crates/resizer/src/moves.rs:1288:50: replace * with / in slews_in_tree::walk
+crates/resizer/src/moves.rs:1289:44: replace + with - in slews_in_tree::walk
+crates/resizer/src/moves.rs:140:9: replace MoveLog::has_pending -> bool with true
+crates/resizer/src/moves.rs:152:38: replace + with * in MoveLog::made
+crates/resizer/src/moves.rs:152:9: replace MoveLog::made -> usize with 0
+crates/resizer/src/moves.rs:152:9: replace MoveLog::made -> usize with 1
+crates/resizer/src/moves.rs:281:9: replace Moves::size_up_match -> Result<bool, RepairError> with Ok(false)
+crates/resizer/src/moves.rs:284:12: delete ! in Moves::size_up_match
+crates/resizer/src/moves.rs:297:21: replace == with != in Moves::size_up_match
+crates/resizer/src/moves.rs:297:33: replace || with && in Moves::size_up_match
+crates/resizer/src/moves.rs:297:64: replace > with < in Moves::size_up_match
+crates/resizer/src/moves.rs:297:64: replace > with == in Moves::size_up_match
+crates/resizer/src/moves.rs:297:64: replace > with >= in Moves::size_up_match
+crates/resizer/src/moves.rs:308:26: replace && with || in Moves::size_up_match
+crates/resizer/src/moves.rs:312:13: replace >= with < in Moves::size_up_match
+crates/resizer/src/moves.rs:316:12: delete ! in Moves::size_up_match
+crates/resizer/src/moves.rs:319:12: delete ! in Moves::size_up_match
+crates/resizer/src/moves.rs:329:9: replace Moves::swap_pins -> bool with false
+crates/resizer/src/moves.rs:333:27: replace || with && in Moves::swap_pins
+crates/resizer/src/moves.rs:333:46: replace || with && in Moves::swap_pins
+crates/resizer/src/moves.rs:342:12: delete ! in Moves::swap_pins
+crates/resizer/src/moves.rs:386:24: replace || with && in Moves::buffer
+crates/resizer/src/moves.rs:386:57: replace || with && in Moves::buffer
+crates/resizer/src/moves.rs:404:9: replace Moves::clone_gate -> Result<bool, RepairError> with Ok(false)
+crates/resizer/src/moves.rs:405:16: delete ! in Moves::clone_gate
+crates/resizer/src/moves.rs:408:13: replace || with && in Moves::clone_gate
+crates/resizer/src/moves.rs:408:16: delete ! in Moves::clone_gate
+crates/resizer/src/moves.rs:418:47: replace / with % in Moves::clone_gate
+crates/resizer/src/moves.rs:418:47: replace / with * in Moves::clone_gate
+crates/resizer/src/moves.rs:504:51: replace - with + in Moves::unbuffer
+crates/resizer/src/moves.rs:504:51: replace - with / in Moves::unbuffer
+crates/resizer/src/moves.rs:506:61: replace + with * in Moves::unbuffer
+crates/resizer/src/moves.rs:506:61: replace + with - in Moves::unbuffer
+crates/resizer/src/moves.rs:506:70: replace <= with > in Moves::unbuffer
+crates/resizer/src/moves.rs:510:56: replace + with * in Moves::unbuffer
+crates/resizer/src/moves.rs:510:56: replace + with - in Moves::unbuffer
+crates/resizer/src/moves.rs:521:22: replace > with < in Moves::unbuffer
+crates/resizer/src/moves.rs:521:22: replace > with == in Moves::unbuffer
+crates/resizer/src/moves.rs:521:22: replace > with >= in Moves::unbuffer
+crates/resizer/src/moves.rs:523:57: replace + with - in Moves::unbuffer
+crates/resizer/src/moves.rs:523:71: replace - with + in Moves::unbuffer
+crates/resizer/src/moves.rs:524:24: replace > with == in Moves::unbuffer
+crates/resizer/src/moves.rs:524:24: replace > with >= in Moves::unbuffer
+crates/resizer/src/moves.rs:611:20: replace < with <= in upsize_cell
+crates/resizer/src/moves.rs:611:28: replace && with || in upsize_cell
+crates/resizer/src/moves.rs:611:39: replace < with <= in upsize_cell
+crates/resizer/src/moves.rs:632:5: replace intrinsic_delay -> Seconds with Default::default()
+crates/resizer/src/moves.rs:635:24: replace > with < in intrinsic_delay
+crates/resizer/src/moves.rs:635:24: replace > with == in intrinsic_delay
+crates/resizer/src/moves.rs:635:24: replace > with >= in intrinsic_delay
+crates/resizer/src/moves.rs:666:30: replace - with + in loads_by_spare_slack
+crates/resizer/src/moves.rs:692:5: replace clone_location -> Point<Dbu> with Point::from(Default::default())
+crates/resizer/src/moves.rs:697:19: replace + with * in clone_location
+crates/resizer/src/moves.rs:697:19: replace + with - in clone_location
+crates/resizer/src/moves.rs:698:22: replace / with % in clone_location
+crates/resizer/src/moves.rs:698:22: replace / with * in clone_location
+crates/resizer/src/moves.rs:698:37: replace / with % in clone_location
+crates/resizer/src/moves.rs:698:37: replace / with * in clone_location
+crates/resizer/src/moves.rs:709:5: replace connect_clone_inputs -> Vec<NetId> with vec![]
+crates/resizer/src/moves.rs:716:12: delete ! in connect_clone_inputs
+crates/resizer/src/moves.rs:736:5: replace is_single_output_combinational -> bool with false
+crates/resizer/src/moves.rs:736:5: replace is_single_output_combinational -> bool with true
+crates/resizer/src/moves.rs:738:12: delete ! in is_single_output_combinational
+crates/resizer/src/moves.rs:738:9: replace && with || in is_single_output_combinational
+crates/resizer/src/moves.rs:739:9: replace && with || in is_single_output_combinational
+crates/resizer/src/moves.rs:740:61: replace == with != in is_single_output_combinational
+crates/resizer/src/moves.rs:740:9: replace && with || in is_single_output_combinational
+crates/resizer/src/moves.rs:762:27: replace - with + in half_driving_power_cell
+crates/resizer/src/moves.rs:763:45: replace < with <= in half_driving_power_cell
+crates/resizer/src/moves.rs:763:45: replace < with == in half_driving_power_cell
+crates/resizer/src/moves.rs:763:45: replace < with > in half_driving_power_cell
+crates/resizer/src/moves.rs:784:27: replace || with && in equivalent_pins
+crates/resizer/src/moves.rs:784:43: replace < with > in equivalent_pins
+crates/resizer/src/moves.rs:784:47: replace || with && in equivalent_pins
+crates/resizer/src/moves.rs:784:63: replace > with == in equivalent_pins
+crates/resizer/src/moves.rs:784:63: replace > with >= in equivalent_pins
+crates/resizer/src/moves.rs:801:54: replace && with || in equivalent_pins
+crates/resizer/src/moves.rs:819:5: replace ports_equivalent -> bool with true
+crates/resizer/src/moves.rs:820:32: replace << with >> in ports_equivalent
+crates/resizer/src/moves.rs:827:29: replace == with != in ports_equivalent
+crates/resizer/src/moves.rs:835:38: replace == with != in ports_equivalent
+crates/resizer/src/moves.rs:837:40: replace >> with << in ports_equivalent
+crates/resizer/src/moves.rs:837:46: replace & with ^ in ports_equivalent
+crates/resizer/src/moves.rs:837:46: replace & with | in ports_equivalent
+crates/resizer/src/moves.rs:837:50: replace == with != in ports_equivalent
+crates/resizer/src/moves.rs:885:26: replace || with && in swap_candidate
+crates/resizer/src/moves.rs:885:47: replace || with && in swap_candidate
+crates/resizer/src/moves.rs:891:18: replace < with <= in swap_candidate
+crates/resizer/src/moves.rs:983:29: replace + with - in driver_change
+crates/resizer/src/moves.rs:983:61: replace - with + in driver_change
+crates/resizer/src/moves.rs:991:46: replace - with + in driver_change
+crates/resizer/src/setup.rs:328:55: replace + with - in repair_setup
+crates/resizer/src/setup.rs:329:56: replace + with * in repair_setup
+crates/resizer/src/setup.rs:329:56: replace + with - in repair_setup
+crates/resizer/src/setup.rs:389:49: replace + with * in Repair<'_, '_>::progress
+crates/resizer/src/setup.rs:389:49: replace + with - in Repair<'_, '_>::progress
+crates/resizer/src/setup.rs:390:50: replace + with * in Repair<'_, '_>::progress
+crates/resizer/src/setup.rs:390:50: replace + with - in Repair<'_, '_>::progress
+crates/resizer/src/setup.rs:436:9: replace Repair<'_, '_>::terminate -> bool with false
+crates/resizer/src/setup.rs:437:29: replace *= with += in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:437:29: replace *= with /= in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:441:45: replace == with != in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:444:33: replace - with + in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:31: replace > with < in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:31: replace > with == in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:31: replace > with >= in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:52: replace && with || in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:60: replace < with <= in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:60: replace < with == in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:447:60: replace < with > in Repair<'_, '_>::terminate
+crates/resizer/src/setup.rs:461:30: delete - in Repair<'_, '_>::legacy_phase
+crates/resizer/src/setup.rs:462:30: delete - in Repair<'_, '_>::legacy_phase
+crates/resizer/src/setup.rs:464:59: replace * with + in Repair<'_, '_>::legacy_phase
+crates/resizer/src/setup.rs:464:59: replace * with / in Repair<'_, '_>::legacy_phase
+crates/resizer/src/setup.rs:531:25: replace == with != in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:542:30: replace += with *= in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:543:33: replace > with == in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:543:33: replace > with >= in Repair<'_, '_>::endpoint_passes
+crates/resizer/src/setup.rs:608:61: replace || with && in Repair<'_, '_>::last_gasp
+crates/resizer/src/setup.rs:621:27: replace + with * in Repair<'_, '_>::last_gasp
+crates/resizer/src/setup.rs:673:41: replace - with + in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:675:30: replace || with && in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:675:40: replace == with != in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:675:57: replace || with && in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:675:94: replace <= with > in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:678:30: delete - in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:678:42: replace - with + in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:691:40: replace == with != in Repair<'_, '_>::repair_endpoint
+crates/resizer/src/setup.rs:723:21: replace && with || in Repair<'_, '_>::load_delay
+crates/resizer/src/setup.rs:724:21: replace && with || in Repair<'_, '_>::load_delay
+crates/resizer/src/setup.rs:725:21: replace && with || in Repair<'_, '_>::load_delay
+crates/resizer/src/setup.rs:738:39: replace && with || in intrinsic_delay
