@@ -1105,3 +1105,64 @@ fn a_flop_on_a_propagated_clock_is_timed_from_the_slew_the_clock_arrives_with() 
         ideal.delay
     );
 }
+
+#[test]
+fn the_area_target_gives_back_a_quarter_of_the_slack_and_a_hundredth_of_the_path() {
+    let mut db = buffered_clock_pair();
+    let q = pin(&db, "f1/Q");
+    with_timed_session(&mut db, &cells(&clock_cells_source()), CLOCK, |resizer| {
+        let mut rebuffer = Rebuffer::new(resizer).unwrap();
+        assert!(rebuffer.set_driver(resizer, q));
+        let plain = resizer.buffered_tree(q).unwrap().unwrap();
+        let tree = rebuffer.annotate_load_slacks(resizer, &plain, q);
+        let slack = rebuffer.slack_at_driver(resizer, &tree);
+        let delay = rebuffer.driver_timing(resizer, &tree).delay;
+        let path = critical_path_delay(&tree).to_seconds();
+        assert!(slack.to_seconds() > Seconds::ZERO && delay > Seconds::ZERO);
+
+        for error in [0.0, -4e-12, 5e-12] {
+            let error = Seconds::new(error);
+            let spare = (slack.to_seconds() - error.min(Seconds::ZERO)).max(Seconds::ZERO);
+            let relaxation = spare / 4.0 + (delay + path) * 0.01;
+
+            assert_eq!(
+                rebuffer.area_target(resizer, &tree, error),
+                slack - Fixed::from_seconds(relaxation),
+                "{error:?}"
+            );
+        }
+        assert_eq!(
+            rebuffer.area_target(resizer, &plain, Seconds::ZERO),
+            -Fixed::INF
+        );
+    });
+}
+
+#[test]
+fn full_rebuffering_counts_the_buffers_it_puts_in_and_takes_out() {
+    let mut db = design(
+        "VERSION 5.8 ;\nDIVIDERCHAR \"/\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN chain ;\n\
+         UNITS DISTANCE MICRONS 2000 ;\nDIEAREA ( 0 0 ) ( 800000 40000 ) ;\n\
+         COMPONENTS 4 ;\n- f1 DFF_X1 + PLACED ( 2000 2800 ) N ;\n\
+         - b1 BUF_X1 + PLACED ( 4000 2800 ) N ;\n- b2 BUF_X1 + PLACED ( 6000 2800 ) N ;\n\
+         - f2 DFF_X1 + PLACED ( 602000 2800 ) N ;\nEND COMPONENTS\n\
+         PINS 1 ;\n- clk + NET clk + DIRECTION INPUT ;\nEND PINS\n\
+         NETS 4 ;\n- clk ( PIN clk ) ( f1 CK ) ( f2 CK ) ;\n- q ( f1 Q ) ( b1 A ) ;\n\
+         - m ( b1 Z ) ( b2 A ) ;\n- d ( b2 Z ) ( f2 D ) ;\nEND NETS\nEND DESIGN\n",
+    );
+    with_wired_session(&mut db, &cells(&clock_cells_source()), CLOCK, |resizer| {
+        let mut rebuffer = Rebuffer::new(resizer).unwrap();
+
+        rebuffer.fully_rebuffer(resizer).unwrap();
+
+        let placed = resizer
+            .db
+            .cells
+            .iter()
+            .filter(|c| !c.retired && c.name.starts_with("place"))
+            .count();
+        assert_eq!(rebuffer.removed, 2);
+        assert!(placed > 0);
+        assert_eq!(rebuffer.inserted, placed);
+    });
+}
